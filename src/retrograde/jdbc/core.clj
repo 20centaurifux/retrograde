@@ -165,7 +165,7 @@
   (read-mem-rep [writer mem-rep-id]
     (let [result (execute-one! writer (select-mem-rep-query tables mem-rep-id))]
       (when (seq result)
-        (update result :data edn/read-string))))
+        (-> result :data edn/read-string))))
 
   (create-record! [writer k mem-rep-id expires-at]
     (let [id (-> (execute-one! writer

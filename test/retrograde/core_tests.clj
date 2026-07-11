@@ -209,11 +209,11 @@
     (let [k1 (gen/generate (gen/not-empty gen/string))
           hash1 (gen/generate hex-string-gen)
           record1 {:id 1 :key k1 :mem-rep-id hash1 :created (java.time.Instant/now)}
-          mem-rep1 {:data {:x 1}}
+          mem-rep1 {:x 1}
           k2 (gen/generate (gen/not-empty gen/string))
           hash2 (gen/generate hex-string-gen)
           record2 {:id 2 :key k2 :mem-rep-id hash2 :created (java.time.Instant/now)}
-          mem-rep2 {:data {:x 2}}
+          mem-rep2 {:x 2}
           new-hash1 (gen/generate hex-string-gen)
           new-hash2 (gen/generate hex-string-gen)
           f (fn [engram]
@@ -253,11 +253,11 @@
     (let [k1 (gen/generate (gen/not-empty gen/string))
           hash1 (gen/generate hex-string-gen)
           record1 {:id 1 :key k1 :mem-rep-id hash1 :created (java.time.Instant/now)}
-          mem-rep1 {:data {:x 1}}
+          mem-rep1 {:x 1}
           k2 (gen/generate (gen/not-empty gen/string))
           hash2 (gen/generate hex-string-gen)
           record2 {:id 2 :key k2 :mem-rep-id hash2 :created (java.time.Instant/now)}
-          mem-rep2 {:data {:x 2}}
+          mem-rep2 {:x 2}
           new-hash (gen/generate hex-string-gen)
           f (fn [engram]
               (if (= (get-in engram [:data :x]) 2)
@@ -291,11 +291,11 @@
     (let [k1 (gen/generate (gen/not-empty gen/string))
           k2 (gen/generate (gen/not-empty gen/string))
           hash (gen/generate hex-string-gen)
-          mem-rep {:data {:x 1}}
+          mem-rep {:x 1}
           record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
           record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
           f (fn [engram]
-              (is (= (:data mem-rep) (:data engram)))
+              (is (= mem-rep (:data engram)))
               :retrograde.core/skip)
           writer (writer
                   (reduce-records [_ f init query]
@@ -321,11 +321,11 @@
     (let [k1 (gen/generate (gen/not-empty gen/string))
           k2 (gen/generate (gen/not-empty gen/string))
           hash (gen/generate hex-string-gen)
-          mem-rep {:data {:x 1}}
+          mem-rep {:x 1}
           record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
           record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
           f (fn [engram]
-              (is (= (:data mem-rep) (:data engram)))
+              (is (= mem-rep (:data engram)))
               :retrograde.core/skip)
           writer (writer
                   (reduce-records [_ f init query]

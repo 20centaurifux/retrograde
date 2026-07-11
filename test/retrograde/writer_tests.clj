@@ -105,8 +105,7 @@
       (let [data {:foo "bar" :baz 42}
             id (put-mem-rep! writer data)
             result (read-mem-rep writer id)]
-        (is (= id (:id result)))
-        (is (= data (:data result))))))
+        (is (= data result)))))
 
   (testing "duplicate insert is idempotent"
     (with-open [writer (open-write store)]
@@ -115,7 +114,7 @@
             id2 (put-mem-rep! writer data)
             result (read-mem-rep writer id1)]
         (is (= id1 id2))
-        (is (= data (:data result)))))))
+        (is (= data result))))))
 
 (defn test-read-mem-rep
   [store]
@@ -129,8 +128,7 @@
             id (put-mem-rep! writer data)
             result (read-mem-rep writer id)]
         (is (some? result))
-        (is (= id (:id result)))
-        (is (= data (:data result)))))))
+        (is (= data result))))))
 
 (defn test-create-record!
   [store]

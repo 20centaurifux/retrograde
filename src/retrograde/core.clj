@@ -72,8 +72,7 @@
     "Stores a memory representation (data).
     Returns the mem-rep-id for the stored data.")
   (read-mem-rep [writer mem-rep-id]
-    "Reads a memory representation by ID.
-    Returns a map with :id and :data fields.")
+    "Reads a memory representation by ID.")
   (create-record! [writer k mem-rep-id expires-at]
     "Creates a new engram record.
     
@@ -189,7 +188,7 @@
 (defn- lookup-mem-rep [w cache mem-rep-id]
   (if-let [mem-rep (cache/lookup cache mem-rep-id)]
     [mem-rep (cache/hit cache mem-rep-id)]
-    (let [{mem-rep :data} (read-mem-rep w mem-rep-id)]
+    (let [mem-rep (read-mem-rep w mem-rep-id)]
       [mem-rep (cache/miss cache mem-rep-id mem-rep)])))
 
 (defn reconsolidate!
