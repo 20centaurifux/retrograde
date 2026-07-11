@@ -252,12 +252,21 @@
                    new-engram (f old-engram)]
                (if (= new-engram ::skip)
                  (assoc state :cache cache')
-                 (let [mem-rep-id' (put-mem-rep! w (:data new-engram))]
-                   (update-record! w (engram->record new-engram mem-rep-id'))
-                   {:count (inc count)
-                    :cache (cache/miss cache'
-                                       mem-rep-id'
-                                       (:data new-engram))}))))
+                 (do
+                   (when-not (and (not= new-engram ::specs/skip)
+                                  (s/valid? ::specs/engram new-engram))
+                     (throw (ex-info "Invalid engram"
+                                     {:explain (s/explain-data ::specs/engram new-engram)})))
+
+                   (when (not= (:id old-engram) (:id new-engram))
+                     (throw (ex-info "Engram ID has changed"
+                                     {:old old-engram :new new-engram})))
+                   (let [mem-rep-id' (put-mem-rep! w (:data new-engram))]
+                     (update-record! w (engram->record new-engram mem-rep-id'))
+                     {:count (inc count)
+                      :cache (cache/miss cache'
+                                         mem-rep-id'
+                                         (:data new-engram))})))))
            {:count 0
             :cache (cache/lu-cache-factory {} :threshold mem-rep-cache-threshold)}
            (->query filter order))]

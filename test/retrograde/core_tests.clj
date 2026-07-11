@@ -1,7 +1,9 @@
 (ns retrograde.core-tests
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.test.check.generators :as gen]
+            [clojure.spec.alpha :as s]
             [retrograde.core :refer :all]
+            [retrograde.specs :as specs]
             [spy.assert :as assert]
             [spy.protocol :as p]))
 
@@ -12,6 +14,23 @@
 
 (def ^:private  hex-string-gen
   (gen/fmap #(apply str %) (gen/vector hex-char-gen 32)))
+
+;;; Helpers
+
+(defn- ->mem-rep-id
+  []
+  (gen/generate hex-string-gen))
+
+(defn- ->record
+  ([id]
+   (->record id (->mem-rep-id)))
+  ([id mem-rep-id]
+   {:id id
+    :key (gen/generate (gen/not-empty gen/string))
+    :mem-rep-id mem-rep-id
+    :created (java.time.Instant/now)
+    :decay-level 0
+    :expires-at (java.time.Instant/now)}))
 
 ;;; Predicates
 
@@ -206,32 +225,28 @@
 
 (deftest test-reconsolidate!
   (testing "reconsolidate multiple engrams"
-    (let [k1 (gen/generate (gen/not-empty gen/string))
-          hash1 (gen/generate hex-string-gen)
-          record1 {:id 1 :key k1 :mem-rep-id hash1 :created (java.time.Instant/now)}
+    (let [record1 (->record 1)
           mem-rep1 {:x 1}
-          k2 (gen/generate (gen/not-empty gen/string))
-          hash2 (gen/generate hex-string-gen)
-          record2 {:id 2 :key k2 :mem-rep-id hash2 :created (java.time.Instant/now)}
+          record2 (->record 2)
           mem-rep2 {:x 2}
           new-hash1 (gen/generate hex-string-gen)
           new-hash2 (gen/generate hex-string-gen)
           f (fn [engram]
               (assoc-in engram [:data :x] (* 2 (get-in engram [:data :x]))))
           writer (writer
-                  (reduce-records [_ f init query]
+                  (reduce-records [_ f init _]
                                   (let [result (f init record1)
                                         result' (f result record2)]
                                     result'))
                   (read-mem-rep [_ mem-rep-id]
                                 (cond
-                                  (= mem-rep-id hash1) mem-rep1
-                                  (= mem-rep-id hash2) mem-rep2))
+                                  (= mem-rep-id (:mem-rep-id record1)) mem-rep1
+                                  (= mem-rep-id (:mem-rep-id record2)) mem-rep2))
                   (put-mem-rep! [_ data]
                                 (cond
                                   (= data {:x 2}) new-hash1
                                   (= data {:x 4}) new-hash2))
-                  (update-record! [_ record])
+                  (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
@@ -239,8 +254,8 @@
       (is (= 2 result))
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
-      (assert/called-with? (:read-mem-rep spy) writer hash1)
-      (assert/called-with? (:read-mem-rep spy) writer hash2)
+      (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record1))
+      (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record2))
       (assert/called-n-times? (:put-mem-rep! spy) 2)
       (assert/called-with? (:put-mem-rep! spy) writer {:x 2})
       (assert/called-with? (:put-mem-rep! spy) writer {:x 4})
@@ -250,30 +265,26 @@
       (assert/called-once? (:commit! spy))))
 
   (testing "f returns :retrograde.core/skip for some engrams"
-    (let [k1 (gen/generate (gen/not-empty gen/string))
-          hash1 (gen/generate hex-string-gen)
-          record1 {:id 1 :key k1 :mem-rep-id hash1 :created (java.time.Instant/now)}
-          mem-rep1 {:x 1}
-          k2 (gen/generate (gen/not-empty gen/string))
-          hash2 (gen/generate hex-string-gen)
-          record2 {:id 2 :key k2 :mem-rep-id hash2 :created (java.time.Instant/now)}
-          mem-rep2 {:x 2}
+    (let [record1 (->record 1)
+          mem-rep1 {:foo 1}
+          record2 (->record 2)
+          mem-rep2 {:bar 2}
           new-hash (gen/generate hex-string-gen)
           f (fn [engram]
-              (if (= (get-in engram [:data :x]) 2)
-                (assoc-in engram [:data :x] 4)
+              (if (= (get-in engram [:data :foo]) 1)
+                (assoc-in engram [:data :bar] 2)
                 :retrograde.core/skip))
           writer (writer
-                  (reduce-records [_ f init query]
+                  (reduce-records [_ f init _]
                                   (let [result (f init record1)
                                         result' (f result record2)]
                                     result'))
                   (read-mem-rep [_ mem-rep-id]
                                 (cond
-                                  (= mem-rep-id hash1) mem-rep1
-                                  (= mem-rep-id hash2) mem-rep2))
-                  (put-mem-rep! [_ data] new-hash)
-                  (update-record! [_ record])
+                                  (= mem-rep-id (:mem-rep-id record1)) mem-rep1
+                                  (= mem-rep-id (:mem-rep-id record1)) mem-rep2))
+                  (put-mem-rep! [_ _] new-hash)
+                  (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
@@ -281,61 +292,55 @@
       (is (= 1 result))
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
-      (assert/called-with? (:read-mem-rep spy) writer hash1)
-      (assert/called-with? (:read-mem-rep spy) writer hash2)
+      (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record1))
+      (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record2))
       (assert/called-once? (:put-mem-rep! spy))
-      (assert/called-once? (:update-record! spy))
+      (assert/called-once-with? (:update-record! spy) writer (assoc record1 :mem-rep-id new-hash))
       (assert/called-once? (:commit! spy))))
 
   (testing "memory representations are cached"
-    (let [k1 (gen/generate (gen/not-empty gen/string))
-          k2 (gen/generate (gen/not-empty gen/string))
-          hash (gen/generate hex-string-gen)
+    (let [mem-rep-id (->mem-rep-id)
+          record1 (->record 1 mem-rep-id)
+          record2 (->record 2 mem-rep-id)
           mem-rep {:x 1}
-          record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
-          record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
-          f (fn [engram]
-              (is (= mem-rep (:data engram)))
+          f (fn [_]
               :retrograde.core/skip)
           writer (writer
-                  (reduce-records [_ f init query]
+                  (reduce-records [_ f init _]
                                   (let [result (f init record1)
                                         result' (f result record2)]
                                     result'))
                   (read-mem-rep [_ _]
                                 mem-rep)
-                  (put-mem-rep! [_ data])
-                  (update-record! [_ record])
+                  (put-mem-rep! [_ _])
+                  (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
           result (reconsolidate! store f)]
       (is (zero? result))
       (assert/called-once? (:reduce-records spy))
-      (assert/called-once-with? (:read-mem-rep spy) writer hash)
+      (assert/called-once-with? (:read-mem-rep spy) writer mem-rep-id)
       (assert/not-called? (:put-mem-rep! spy))
       (assert/not-called? (:update-record! spy))
       (assert/called-once? (:commit! spy))))
 
   (testing "memory representation cache is local only"
-    (let [k1 (gen/generate (gen/not-empty gen/string))
-          k2 (gen/generate (gen/not-empty gen/string))
-          hash (gen/generate hex-string-gen)
+    (let [mem-rep-id (->mem-rep-id)
+          record1 (->record 1 mem-rep-id)
+          record2 (->record 2 mem-rep-id)
           mem-rep {:x 1}
-          record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
-          record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
-          f (fn [engram]
-              (is (= mem-rep (:data engram)))
+          f (fn [_]
               :retrograde.core/skip)
           writer (writer
-                  (reduce-records [_ f init query]
+                  (reduce-records [_ f init _]
                                   (let [result (f init record1)
                                         result' (f result record2)]
                                     result'))
                   (read-mem-rep [_ _]
                                 mem-rep)
-                  (put-mem-rep! [_ data])
-                  (update-record! [_ record])
+                  (put-mem-rep! [_ _])
+                  (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
@@ -345,4 +350,63 @@
       (assert/called-n-times? (:read-mem-rep spy) 5)
       (assert/not-called? (:put-mem-rep! spy))
       (assert/not-called? (:update-record! spy))
-      (assert/called-n-times? (:commit! spy) 5))))
+      (assert/called-n-times? (:commit! spy) 5)))
+
+  (testing "throws ex-info when f returns invalid engram"
+    (let [record (->record 1)
+          mem-rep {:x 1}
+          f (fn [_]
+              23)
+          writer (writer
+                  (reduce-records [_ f init query]
+                                  (f init record))
+                  (read-mem-rep [_ _]
+                                mem-rep)
+                  (put-mem-rep! [_ _])
+                  (update-record! [_ _])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (try
+        (reconsolidate! store f)
+        (is false "Expected ex-info to be thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= "Invalid engram" (.getMessage e)))
+          (let [data (ex-data e)]
+            (is (= (-> data :explain ::s/problems first :val) 23))
+            (is (contains? data :explain))
+            (is (some? (:explain data))))))
+      (assert/called-once? (:reduce-records spy))
+      (assert/called-once? (:read-mem-rep spy))
+      (assert/not-called? (:put-mem-rep! spy))
+      (assert/not-called? (:update-record! spy))
+      (assert/not-called? (:commit! spy))))
+
+  (testing "throws ex-info when f changes engram ID"
+    (let [record (->record 1)
+          mem-rep {:x 1}
+          f (fn [engram]
+              (assoc engram :id (inc (:id engram))))
+          writer (writer
+                  (reduce-records [_ f init query]
+                                  (f init record))
+                  (read-mem-rep [_ _]
+                                mem-rep)
+                  (put-mem-rep! [_ _])
+                  (update-record! [_ _])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (try
+        (reconsolidate! store f)
+        (is false "Expected ex-info to be thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= "Engram ID has changed" (.getMessage e)))
+          (let [data (ex-data e)]
+            (is (s/valid? ::specs/engram (:old data)))
+            (is (s/valid? ::specs/engram (:new data))))))
+      (assert/called-once? (:reduce-records spy))
+      (assert/called-once? (:read-mem-rep spy))
+      (assert/not-called? (:put-mem-rep! spy))
+      (assert/not-called? (:update-record! spy))
+      (assert/not-called? (:commit! spy)))))
