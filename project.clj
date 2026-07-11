@@ -8,6 +8,7 @@
                  [com.github.seancorfield/honeysql "2.7.1399"]]
   :target-path "target/%s"
   :aot nil
-  :profiles {:test {:dependencies [[org.clojure/test.check "1.1.3"]
+  :profiles {:test {:dependencies [[org.clojure/core.cache "1.2.263"]
+                                   [org.clojure/test.check "1.1.3"]
                                    [org.xerial/sqlite-jdbc "3.53.2.0"]
                                    [tortue/spy "2.15.0"]]}})

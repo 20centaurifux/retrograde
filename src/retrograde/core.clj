@@ -1,6 +1,23 @@
 (ns retrograde.core
   (:require [retrograde.specs :as specs]
-            [clojure.spec.alpha :as s]))
+            [clojure.spec.alpha :as s]
+            [clojure.core.cache :as cache]))
+
+(def ^:private mem-rep-cache-threshold 100)
+
+;;; Conversion
+
+(defn record->engram
+  [record mem-rep]
+  (-> record
+      (dissoc :mem-rep-id)
+      (assoc :data mem-rep)))
+
+(defn engram->record
+  [engram mem-rep-id]
+  (-> engram
+      (dissoc :data)
+      (assoc :mem-rep-id mem-rep-id)))
 
 ;;; Protocols
 
@@ -113,9 +130,7 @@
     (let [mem-rep-id (put-mem-rep! w mem-rep)
           record (create-record! w k mem-rep-id expires-at)]
       (commit! w)
-      (-> record
-          (dissoc :mem-rep-id)
-          (assoc :data mem-rep)))))
+      (record->engram record mem-rep))))
 
 (defn recall
   "Retrieves an engram from the store by its ID.
@@ -168,6 +183,15 @@
   (with-open [r (open-read store)]
     (stream-engrams r xform f init (->query filter order))))
 
+;; Looks up a memory representation with LRU caching. Returns [mem-rep updated-cache].
+;; On cache hit: returns cached data and updates hit statistics.
+;; On cache miss: reads from storage and adds to cache.
+(defn- lookup-mem-rep [w cache mem-rep-id]
+  (if-let [mem-rep (cache/lookup cache mem-rep-id)]
+    [mem-rep (cache/hit cache mem-rep-id)]
+    (let [{mem-rep :data} (read-mem-rep w mem-rep-id)]
+      [mem-rep (cache/miss cache mem-rep-id mem-rep)])))
+
 (defn reconsolidate!
   "Applies a transformation function to selected engrams and updates them in the store.
   
@@ -178,8 +202,8 @@
          - :retrograde.core/skip (engram will be skipped)
   - `filter`: Optional keyword argument, a filter map to select engrams.
             Supported filters:
-            - `:keys` - collection of key strings to match
-            - `:ids` - collection of engram IDs to match
+            - `:key` - collection of key strings to match
+            - `:id` - collection of engram IDs to match
             - `:expires-until` - Instant, selects engrams expiring before this time
             - `:expires-after` - Instant, selects engrams expiring after this time
   - `order`: Optional keyword argument, a vector of [field direction] tuples (default: [[:created :asc]])
@@ -216,27 +240,27 @@
       :filter {:expires-until (java.time.Instant/now)}
       :order [[:expires-at :asc]])"
   [store f & {:keys [filter order] :or {order [[:created :asc]]}}]
-  {:pre [(store? store)
-         (fn? f)
-         (s/valid? (s/nilable ::specs/filter) filter)
+  {:pre [(store? store) (fn? f) (s/valid? (s/nilable ::specs/filter) filter)
          (s/valid? ::specs/order order)]}
   (with-open [w (open-write store)]
-    (let [result (reduce-records
-                  w
-                  (fn [count record]
-                    (let [mem-rep (read-mem-rep w (:mem-rep-id record))
-                          old-engram (-> record
-                                         (dissoc :mem-rep-id)
-                                         (assoc :data (:data mem-rep)))
-                          new-engram (f old-engram)]
-                      (if (identical? new-engram ::skip)
-                        count
-                        (let [mem-rep-id (put-mem-rep! w (:data new-engram))]
-                          (update-record! w (-> new-engram
-                                                (dissoc :data)
-                                                (assoc :mem-rep-id mem-rep-id)))
-                          (inc count)))))
-                  0
-                  (->query filter order))]
+    (let [result
+          (reduce-records
+           w
+           (fn [{:keys [count cache] :as state}
+                {:keys [mem-rep-id] :as record}]
+             (let [[mem-rep cache'] (lookup-mem-rep w cache mem-rep-id)
+                   old-engram (record->engram record mem-rep)
+                   new-engram (f old-engram)]
+               (if (= new-engram ::skip)
+                 (assoc state :cache cache')
+                 (let [mem-rep-id' (put-mem-rep! w (:data new-engram))]
+                   (update-record! w (engram->record new-engram mem-rep-id'))
+                   {:count (inc count)
+                    :cache (cache/miss cache'
+                                       mem-rep-id'
+                                       (:data new-engram))}))))
+           {:count 0
+            :cache (cache/lu-cache-factory {} :threshold mem-rep-cache-threshold)}
+           (->query filter order))]
       (commit! w)
-      result)))
+      (:count result))))

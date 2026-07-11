@@ -285,4 +285,64 @@
       (assert/called-with? (:read-mem-rep spy) writer hash2)
       (assert/called-once? (:put-mem-rep! spy))
       (assert/called-once? (:update-record! spy))
-      (assert/called-once? (:commit! spy)))))
+      (assert/called-once? (:commit! spy))))
+
+  (testing "memory representations are cached"
+    (let [k1 (gen/generate (gen/not-empty gen/string))
+          k2 (gen/generate (gen/not-empty gen/string))
+          hash (gen/generate hex-string-gen)
+          mem-rep {:data {:x 1}}
+          record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
+          record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
+          f (fn [engram]
+              (is (= (:data mem-rep) (:data engram)))
+              :retrograde.core/skip)
+          writer (writer
+                  (reduce-records [_ f init query]
+                                  (let [result (f init record1)
+                                        result' (f result record2)]
+                                    result'))
+                  (read-mem-rep [_ _]
+                                mem-rep)
+                  (put-mem-rep! [_ data])
+                  (update-record! [_ record])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)
+          result (reconsolidate! store f)]
+      (is (zero? result))
+      (assert/called-once? (:reduce-records spy))
+      (assert/called-once-with? (:read-mem-rep spy) writer hash)
+      (assert/not-called? (:put-mem-rep! spy))
+      (assert/not-called? (:update-record! spy))
+      (assert/called-once? (:commit! spy))))
+
+  (testing "memory representation cache is local only"
+    (let [k1 (gen/generate (gen/not-empty gen/string))
+          k2 (gen/generate (gen/not-empty gen/string))
+          hash (gen/generate hex-string-gen)
+          mem-rep {:data {:x 1}}
+          record1 {:id 1 :key k1 :mem-rep-id hash :created (java.time.Instant/now)}
+          record2 {:id 2 :key k2 :mem-rep-id hash :created (java.time.Instant/now)}
+          f (fn [engram]
+              (is (= (:data mem-rep) (:data engram)))
+              :retrograde.core/skip)
+          writer (writer
+                  (reduce-records [_ f init query]
+                                  (let [result (f init record1)
+                                        result' (f result record2)]
+                                    result'))
+                  (read-mem-rep [_ _]
+                                mem-rep)
+                  (put-mem-rep! [_ data])
+                  (update-record! [_ record])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)
+          result (repeatedly 5 #(reconsolidate! store f))]
+      (is (every? zero? result))
+      (assert/called-n-times? (:reduce-records spy) 5)
+      (assert/called-n-times? (:read-mem-rep spy) 5)
+      (assert/not-called? (:put-mem-rep! spy))
+      (assert/not-called? (:update-record! spy))
+      (assert/called-n-times? (:commit! spy) 5))))
