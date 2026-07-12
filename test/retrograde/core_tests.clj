@@ -21,18 +21,26 @@
   []
   (gen/generate hex-string-gen))
 
+;; Builds record fixtures with generated defaults while allowing tests to pin
+;; the fields that are relevant for the behavior under test.
 (defn- ->record
   ([id]
-   (->record id (->mem-rep-id)))
-  ([id mem-rep-id]
-   {:id id
-    :key (gen/generate (gen/not-empty gen/string))
-    :mem-rep-id mem-rep-id
-    :created (java.time.Instant/now)
-    :decay-level 0
-    :expires-at (java.time.Instant/now)}))
+   (->record id {}))
+  ([id fields]
+   (let [{:keys [key mem-rep-id created decay-level expires-at]
+          :or {mem-rep-id (->mem-rep-id)
+               key (gen/generate (gen/not-empty gen/string))
+               created (java.time.Instant/now)
+               decay-level 0
+               expires-at (java.time.Instant/now)}} fields]
+     {:id id
+      :key key
+      :mem-rep-id mem-rep-id
+      :created created
+      :decay-level decay-level
+      :expires-at expires-at})))
 
-;;; Predicates
+;;; Predicates Tests
 
 (deftest test-store?
   (testing "Store is Store"
@@ -68,7 +76,7 @@
   Store
   (open-read [_] r))
 
-;;; Reset store
+;;; Delete Store Tests
 
 (deftest test-clear-all!
   (testing "calls delete-all! and commit!"
@@ -78,6 +86,7 @@
           spy (p/spies writer)
           store (->WriterStore writer)]
       (clear-all! store)
+
       (assert/called-once-with? (:delete-all! spy) writer)
       (assert/called-once-with? (:commit! spy) writer)))
 
@@ -88,6 +97,7 @@
           spy (p/spies writer)
           store (->WriterStore writer)]
       (is (thrown? Exception (clear-all! store)))
+
       (assert/called-once-with? (:delete-all! spy) writer)
       (assert/not-called? (:commit! spy))))
 
@@ -98,130 +108,161 @@
           spy (p/spies writer)
           store (->WriterStore writer)]
       (is (thrown? Exception (clear-all! store)))
+
       (assert/called-once-with? (:delete-all! spy) writer)
       (assert/called-once-with? (:commit! spy) writer))))
 
 ;;; Direct Engram Access
 
 (deftest test-memorize!
-  (let [k (gen/generate (gen/not-empty gen/string))
-        data (gen/generate (gen/map gen/keyword gen/any))
-        hash (gen/generate hex-string-gen)]
-    (testing "without expiry date"
-      (let [record {:id 1
-                    :key k
-                    :created (java.time.Instant/now)
-                    :mem-rep-id hash
-                    :decay-level 0
-                    :expires-at 0}
-            writer (writer
-                    (put-mem-rep! [_ _] hash)
-                    (create-record! [_ _ _ _] record)
-                    (commit! [_]))
-            spy (p/spies writer)
-            store (->WriterStore writer)
-            engram (-> record
-                       (dissoc :mem-rep-id)
-                       (assoc :data data))]
-        (let [result (memorize! store k data)]
-          (is (= result engram))
-          (assert/called-once-with? (:put-mem-rep! spy) writer data)
-          (assert/called-once-with? (:create-record! spy) writer k hash nil)
-          (assert/called-once-with? (:commit! spy) writer))))
+  (testing "without expiry date"
+    (let [id 1
+          k "a"
+          timestamp (java.time.Instant/now)
+          mem-rep-id (->mem-rep-id)
+          mem-rep {:x 1}
+          writer (writer
+                  (put-mem-rep! [_ mem-rep]
+                                mem-rep-id)
+                  (create-record! [_ k mem-rep-id expires-at]
+                                  (->record id
+                                            {:key k
+                                             :mem-rep-id mem-rep-id
+                                             :created timestamp
+                                             :expires-at expires-at}))
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (let [engram (memorize! store k mem-rep)]
+        (is (s/valid? ::specs/engram engram))
+        (is (= id (:id engram)))
+        (is (= k (:key engram)))
+        (is (= mem-rep (:data engram)))
+        (is (= timestamp (:created engram)))
+        (is (zero? (:decay-level engram)))
+        (is (nil? (:expires-at engram))))
 
-    (testing "with expiry date"
-      (let [expiry-date (.plus (java.time.Instant/now) (java.time.Duration/ofDays 1))
-            record {:id 1
-                    :key k
-                    :created (java.time.Instant/now)
-                    :mem-rep-id hash
-                    :decay-level 0
-                    :expires-at expiry-date}
-            writer (writer
-                    (put-mem-rep! [_ _] hash)
-                    (create-record! [_ _ _ _] record)
-                    (commit! [_]))
-            spy (p/spies writer)
-            store (->WriterStore writer)
-            engram (-> record
-                       (dissoc :mem-rep-id)
-                       (assoc :data data))]
-        (let [result (memorize! store k data :expires-at expiry-date)]
-          (is (= result engram))
-          (assert/called-once-with? (:put-mem-rep! spy) writer data)
-          (assert/called-once-with? (:create-record! spy) writer k hash expiry-date)
-          (assert/called-once-with? (:commit! spy) writer))))
+      (assert/called-once-with? (:put-mem-rep! spy) writer mem-rep)
+      (assert/called-once-with? (:create-record! spy) writer k mem-rep-id nil)
+      (assert/called-once-with? (:commit! spy) writer)))
 
-    (testing "put-mem-rep! throws Exception"
-      (let [writer (writer
-                    (put-mem-rep! [_ _] (throw (Exception. "put-mem-rep! failed")))
-                    (create-record! [_ _ _ _])
-                    (commit! [_]))
-            spy (p/spies writer)
-            store (->WriterStore writer)]
-        (is (thrown? Exception (memorize! store k data)))
-        (assert/called-once-with? (:put-mem-rep! spy) writer data)
-        (assert/not-called? (:create-record! spy))
-        (assert/not-called? (:commit! spy))))
+  (testing "with expiry date"
+    (let [id 1
+          k "a"
+          timestamp (java.time.Instant/now)
+          mem-rep-id (->mem-rep-id)
+          mem-rep {:x 1}
+          expiry-date (.plus (java.time.Instant/now) (java.time.Duration/ofDays 1))
+          writer (writer
+                  (put-mem-rep! [_ mem-rep]
+                                mem-rep-id)
+                  (create-record! [_ k mem-rep-id expires-at]
+                                  (->record id
+                                            {:key k
+                                             :mem-rep-id mem-rep-id
+                                             :created timestamp
+                                             :expires-at expires-at}))
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (let [engram (memorize! store k mem-rep :expires-at expiry-date)]
+        (is (s/valid? ::specs/engram engram))
+        (is (= id (:id engram)))
+        (is (= k (:key engram)))
+        (is (= mem-rep (:data engram)))
+        (is (= timestamp (:created engram)))
+        (is (zero? (:decay-level engram)))
+        (is (= expiry-date (:expires-at engram))))
 
-    (testing "create-record! throws Exceptions"
-      (let [writer (writer
-                    (put-mem-rep! [_ _] hash)
-                    (create-record! [_ _ _ _] (throw (Exception. "create-record! failed")))
-                    (commit! [_]))
-            spy (p/spies writer)
-            store (->WriterStore writer)]
-        (is (thrown? Exception (memorize! store k data)))
-        (assert/called-once-with? (:put-mem-rep! spy) writer data)
-        (assert/called-once-with? (:create-record! spy) writer k hash nil)
-        (assert/not-called? (:commit! spy))))))
+      (assert/called-once-with? (:put-mem-rep! spy) writer mem-rep)
+      (assert/called-once-with? (:create-record! spy) writer k mem-rep-id expiry-date)
+      (assert/called-once-with? (:commit! spy) writer)))
+
+  (testing "put-mem-rep! throws Exception"
+    (let [k "a"
+          mem-rep {:x 1}
+          writer (writer
+                  (put-mem-rep! [_ _] (throw (Exception. "put-mem-rep! failed")))
+                  (create-record! [_ _ _ _])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (is (thrown? Exception (memorize! store k mem-rep)))
+
+      (assert/called-once-with? (:put-mem-rep! spy) writer mem-rep)
+      (assert/not-called? (:create-record! spy))
+      (assert/not-called? (:commit! spy))))
+
+  (testing "create-record! throws Exceptions"
+    (let [k "a"
+          mem-rep-id (->mem-rep-id)
+          mem-rep {:x 1}
+          writer (writer
+                  (put-mem-rep! [_ _] mem-rep-id)
+                  (create-record! [_ _ _ _] (throw (Exception. "create-record! failed")))
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (is (thrown? Exception (memorize! store k mem-rep)))
+
+      (assert/called-once-with? (:put-mem-rep! spy) writer mem-rep)
+      (assert/called-once-with? (:create-record! spy) writer k mem-rep-id nil)
+      (assert/not-called? (:commit! spy)))))
 
 (deftest test-recall
   (testing "engram found"
-    (let [id (gen/generate (gen/large-integer* {:min 1}))
-          engram {:id id
-                  :key (gen/generate (gen/not-empty gen/string))
-                  :created (java.time.Instant/now)
-                  :decay-level 0
-                  :expires-at nil}
+    (let [engram (-> (->record 1)
+                     (record->engram  {:x 1}))
           reader (reader
                   (read-engram [_ _] engram))
           spy (p/spies reader)
           store (->ReaderStore reader)
-          match (recall store id)]
+          match (recall store 1)]
       (is (= engram match))
-      (assert/called-once-with? (:read-engram spy) reader id)))
+
+      (assert/called-once-with? (:read-engram spy) reader 1)))
 
   (testing "engram not found"
-    (let [id (gen/generate (gen/large-integer* {:min 1}))
-          reader (reader
+    (let [reader (reader
                   (read-engram [_ _]))
           spy (p/spies reader)
           store (->ReaderStore reader)
-          match (recall store id)]
+          match (recall store 1)]
       (is (nil? match))
-      (assert/called-once-with? (:read-engram spy) reader id))))
+
+      (assert/called-once-with? (:read-engram spy) reader 1))))
+
+;;; Streaming Tests
 
 (deftest test-transduce-engrams
   (testing "transduce engrams"
-    (let [engrams [{:id 1 :key "a" :data {:x 1}}
-                   {:id 2 :key "b" :data {:x 2}}
-                   {:id 3 :key "c" :data {:x 3}}]
-          xform (map :data)
+    (let [engrams [(-> (->record 1 {:key "a"})
+                       (record->engram {:x 1}))
+                   (-> (->record 2 {:key "b"})
+                       (record->engram {:x 2}))
+                   (-> (->record 3 {:key "c"})
+                       (record->engram {:x 3}))]
           reader (reader
                   (stream-engrams [_ xf f init query]
                                   (transduce xf f init engrams)))
           spy (p/spies reader)
           store (->ReaderStore reader)
-          result (transduce-engrams store xform conj [] :order [[:key :asc]] :filter {:key ["a" "b" "c"]})]
+          xform (map :data)
+          result (transduce-engrams store
+                                    xform
+                                    conj
+                                    []
+                                    :order [[:key :asc]]
+                                    :filter {:key ["a" "b" "c"]})]
       (is (= [{:x 1} {:x 2} {:x 3}] result))
-      (assert/called-once-with?
-       (:stream-engrams spy)
-       reader
-       xform
-       conj
-       []
-       {:order [[:key :asc]] :filter {:key ["a" "b" "c"]}}))))
+
+      (assert/called-once-with? (:stream-engrams spy)
+                                reader
+                                xform
+                                conj
+                                []
+                                {:order [[:key :asc]]
+                                 :filter {:key ["a" "b" "c"]}}))))
 
 (deftest test-reconsolidate!
   (testing "reconsolidate multiple engrams"
@@ -229,10 +270,12 @@
           mem-rep1 {:x 1}
           record2 (->record 2)
           mem-rep2 {:x 2}
-          new-hash1 (gen/generate hex-string-gen)
-          new-hash2 (gen/generate hex-string-gen)
+          new-mem-rep-id1 (gen/generate hex-string-gen)
+          new-mem-rep-id2 (gen/generate hex-string-gen)
           f (fn [engram]
-              (assoc-in engram [:data :x] (* 2 (get-in engram [:data :x]))))
+              (assoc-in engram
+                        [:data :x]
+                        (* 2 (get-in engram [:data :x]))))
           writer (writer
                   (reduce-records [_ f init _]
                                   (let [result (f init record1)
@@ -244,14 +287,15 @@
                                   (= mem-rep-id (:mem-rep-id record2)) mem-rep2))
                   (put-mem-rep! [_ data]
                                 (cond
-                                  (= data {:x 2}) new-hash1
-                                  (= data {:x 4}) new-hash2))
+                                  (= data {:x 2}) new-mem-rep-id1
+                                  (= data {:x 4}) new-mem-rep-id2))
                   (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
           result (reconsolidate! store f)]
       (is (= 2 result))
+
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
       (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record1))
@@ -260,19 +304,21 @@
       (assert/called-with? (:put-mem-rep! spy) writer {:x 2})
       (assert/called-with? (:put-mem-rep! spy) writer {:x 4})
       (assert/called-n-times? (:update-record! spy) 2)
-      (assert/called-with? (:update-record! spy) writer (assoc record1 :mem-rep-id new-hash1))
-      (assert/called-with? (:update-record! spy) writer (assoc record2 :mem-rep-id new-hash2))
+      (assert/called-with? (:update-record! spy) writer
+                           (assoc record1 :mem-rep-id new-mem-rep-id1))
+      (assert/called-with? (:update-record! spy) writer
+                           (assoc record2 :mem-rep-id new-mem-rep-id2))
       (assert/called-once? (:commit! spy))))
 
   (testing "f returns :retrograde.core/skip for some engrams"
     (let [record1 (->record 1)
-          mem-rep1 {:foo 1}
+          mem-rep1 {:x :first}
           record2 (->record 2)
-          mem-rep2 {:bar 2}
-          new-hash (gen/generate hex-string-gen)
+          mem-rep2 {:x :second}
+          new-mem-rep-id (->mem-rep-id)
           f (fn [engram]
-              (if (= (get-in engram [:data :foo]) 1)
-                (assoc-in engram [:data :bar] 2)
+              (if (= (get-in engram [:data :x]) :first)
+                (assoc-in engram [:data :y] 1)
                 :retrograde.core/skip))
           writer (writer
                   (reduce-records [_ f init _]
@@ -282,29 +328,30 @@
                   (read-mem-rep [_ mem-rep-id]
                                 (cond
                                   (= mem-rep-id (:mem-rep-id record1)) mem-rep1
-                                  (= mem-rep-id (:mem-rep-id record1)) mem-rep2))
-                  (put-mem-rep! [_ _] new-hash)
+                                  (= mem-rep-id (:mem-rep-id record2)) mem-rep2))
+                  (put-mem-rep! [_ _] new-mem-rep-id)
                   (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
           result (reconsolidate! store f)]
       (is (= 1 result))
+
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
       (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record1))
       (assert/called-with? (:read-mem-rep spy) writer (:mem-rep-id record2))
       (assert/called-once? (:put-mem-rep! spy))
-      (assert/called-once-with? (:update-record! spy) writer (assoc record1 :mem-rep-id new-hash))
+      (assert/called-once-with? (:update-record! spy)
+                                writer
+                                (assoc record1 :mem-rep-id new-mem-rep-id))
       (assert/called-once? (:commit! spy))))
 
   (testing "memory representations are cached"
     (let [mem-rep-id (->mem-rep-id)
-          record1 (->record 1 mem-rep-id)
-          record2 (->record 2 mem-rep-id)
+          record1 (->record 1 {:mem-rep-id mem-rep-id})
+          record2 (->record 2 {:mem-rep-id mem-rep-id})
           mem-rep {:x 1}
-          f (fn [_]
-              :retrograde.core/skip)
           writer (writer
                   (reduce-records [_ f init _]
                                   (let [result (f init record1)
@@ -317,8 +364,10 @@
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
-          result (reconsolidate! store f)]
+          result (reconsolidate! store
+                                 (constantly :retrograde.core/skip))]
       (is (zero? result))
+
       (assert/called-once? (:reduce-records spy))
       (assert/called-once-with? (:read-mem-rep spy) writer mem-rep-id)
       (assert/not-called? (:put-mem-rep! spy))
@@ -327,11 +376,9 @@
 
   (testing "memory representation cache is local only"
     (let [mem-rep-id (->mem-rep-id)
-          record1 (->record 1 mem-rep-id)
-          record2 (->record 2 mem-rep-id)
+          record1 (->record 1 {:mem-rep-id mem-rep-id})
+          record2 (->record 2 {:mem-rep-id mem-rep-id})
           mem-rep {:x 1}
-          f (fn [_]
-              :retrograde.core/skip)
           writer (writer
                   (reduce-records [_ f init _]
                                   (let [result (f init record1)
@@ -344,8 +391,11 @@
                   (commit! [_]))
           spy (p/spies writer)
           store (->WriterStore writer)
-          result (repeatedly 5 #(reconsolidate! store f))]
+          result (repeatedly 5
+                             #(reconsolidate! store
+                                              (constantly :retrograde.core/skip)))]
       (is (every? zero? result))
+
       (assert/called-n-times? (:reduce-records spy) 5)
       (assert/called-n-times? (:read-mem-rep spy) 5)
       (assert/not-called? (:put-mem-rep! spy))
@@ -355,8 +405,6 @@
   (testing "throws ex-info when f returns invalid engram"
     (let [record (->record 1)
           mem-rep {:x 1}
-          f (fn [_]
-              23)
           writer (writer
                   (reduce-records [_ f init query]
                                   (f init record))
@@ -368,14 +416,14 @@
           spy (p/spies writer)
           store (->WriterStore writer)]
       (try
-        (reconsolidate! store f)
+        (reconsolidate! store (constantly 1))
         (is false "Expected ex-info to be thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= "Invalid engram" (.getMessage e)))
-          (let [data (ex-data e)]
-            (is (= (-> data :explain ::s/problems first :val) 23))
-            (is (contains? data :explain))
+        (catch clojure.lang.ExceptionInfo ex
+          (is (= "Invalid engram" (.getMessage ex)))
+          (let [data (ex-data ex)]
+            (is (= (-> data :explain ::s/problems first :val) 1))
             (is (some? (:explain data))))))
+
       (assert/called-once? (:reduce-records spy))
       (assert/called-once? (:read-mem-rep spy))
       (assert/not-called? (:put-mem-rep! spy))
@@ -385,8 +433,6 @@
   (testing "throws ex-info when f changes engram ID"
     (let [record (->record 1)
           mem-rep {:x 1}
-          f (fn [engram]
-              (assoc engram :id (inc (:id engram))))
           writer (writer
                   (reduce-records [_ f init query]
                                   (f init record))
@@ -396,15 +442,18 @@
                   (update-record! [_ _])
                   (commit! [_]))
           spy (p/spies writer)
-          store (->WriterStore writer)]
+          store (->WriterStore writer)
+          f (fn [engram]
+              (assoc engram :id (inc (:id engram))))]
       (try
         (reconsolidate! store f)
         (is false "Expected ex-info to be thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= "Engram ID has changed" (.getMessage e)))
-          (let [data (ex-data e)]
+        (catch clojure.lang.ExceptionInfo ex
+          (is (= "Engram ID has changed" (.getMessage ex)))
+          (let [data (ex-data ex)]
             (is (s/valid? ::specs/engram (:old data)))
             (is (s/valid? ::specs/engram (:new data))))))
+
       (assert/called-once? (:reduce-records spy))
       (assert/called-once? (:read-mem-rep spy))
       (assert/not-called? (:put-mem-rep! spy))
