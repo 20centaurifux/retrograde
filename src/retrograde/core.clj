@@ -201,7 +201,7 @@
   :expires-at, and :decay-level fields. It should return an updated engram map or
    :retrograde.core/skip to skip the update.
   
-  Returns the number of engrams that were actually altered.
+  Returns a vector of the updated engrams. Skipped engrams are not included.
   
   Example:
     (defn decay-by-level
@@ -230,10 +230,10 @@
   {:pre [(store? store) (fn? f) (s/valid? (s/nilable ::specs/filter) filter)
          (s/valid? ::specs/order order)]}
   (with-open [w (open-write store)]
-    (let [result
+    (let [{:keys [result]}
           (reduce-records
            w
-           (fn [{:keys [count cache] :as state}
+           (fn [{:keys [result cache] :as state}
                 {:keys [mem-rep-id] :as record}]
              (let [[mem-rep cache'] (lookup-mem-rep w cache mem-rep-id)
                    old-engram (-> record
@@ -256,12 +256,12 @@
                      (update-record! w (-> new-engram
                                            (dissoc :data)
                                            (assoc :mem-rep-id mem-rep-id')))
-                     {:count (inc count)
+                     {:result (conj result new-engram)
                       :cache (cache/miss cache'
                                          mem-rep-id'
                                          (:data new-engram))})))))
-           {:count 0
+           {:result []
             :cache (cache/lu-cache-factory {} :threshold mem-rep-cache-threshold)}
            (->query filter order))]
       (commit! w)
-      (:count result))))
+      result)))

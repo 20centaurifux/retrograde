@@ -150,6 +150,8 @@ The `reconsolidate!` function iterates over engrams and applies a transformation
   - **An engram map** - writes the updated engram back to the database
   - **`:retrograde.core/skip`** - skips this engram without making changes
 - The entire process happens within a single transaction, ensuring atomicity
+- `reconsolidate!` returns a vector of the updated engrams. Engrams skipped with
+`:retrograde.core/skip` are not included.
 
 ```clojure
 (defn decay-by-level

@@ -292,7 +292,22 @@
           spy (p/spies writer)
           store (->WriterStore writer)
           result (reconsolidate! store f)]
-      (is (= 2 result))
+      (let [[a b] result]
+        (is (s/valid? ::specs/engram a))
+        (is (= (:id record1) (:id a)))
+        (is (= (:key record1) (:key a)))
+        (is (= {:x 2} (:data a)))
+        (is (= (:created record1) (:created a)))
+        (is (= (:decay-level record1) (:decay-level a)))
+        (is (= (:expires-at record1) (:expires-at a)))
+
+        (is (s/valid? ::specs/engram b))
+        (is (= (:id record2) (:id b)))
+        (is (= (:key record2) (:key b)))
+        (is (= {:x 4} (:data b)))
+        (is (= (:created record2) (:created b)))
+        (is (= (:decay-level record2) (:decay-level b)))
+        (is (= (:expires-at record2) (:expires-at b))))
 
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
@@ -333,7 +348,14 @@
           spy (p/spies writer)
           store (->WriterStore writer)
           result (reconsolidate! store f)]
-      (is (= 1 result))
+      (let [[a] result]
+        (is (s/valid? ::specs/engram a))
+        (is (= (:id record1) (:id a)))
+        (is (= (:key record1) (:key a)))
+        (is (= {:x :first :y 1} (:data a)))
+        (is (= (:created record1) (:created a)))
+        (is (= (:decay-level record1) (:decay-level a)))
+        (is (= (:expires-at record1) (:expires-at a))))
 
       (assert/called-once? (:reduce-records spy))
       (assert/called-n-times? (:read-mem-rep spy) 2)
@@ -364,7 +386,7 @@
           store (->WriterStore writer)
           result (reconsolidate! store
                                  (constantly :retrograde.core/skip))]
-      (is (zero? result))
+      (is (empty? result))
 
       (assert/called-once? (:reduce-records spy))
       (assert/called-once-with? (:read-mem-rep spy) writer mem-rep-id)
@@ -392,7 +414,7 @@
           result (repeatedly 5
                              #(reconsolidate! store
                                               (constantly :retrograde.core/skip)))]
-      (is (every? zero? result))
+      (is (every? empty? result))
 
       (assert/called-n-times? (:reduce-records spy) 5)
       (assert/called-n-times? (:read-mem-rep spy) 5)
