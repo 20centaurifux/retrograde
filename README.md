@@ -57,7 +57,6 @@ Here's a quick example of setting up Retrograde with a SQLite database:
 
 (def store (->Store ds store-opts))
 
-
 (rg/init store)
 ```
 
@@ -77,7 +76,7 @@ You can optionally specify an expiration date after which the memory becomes eli
                 "alice"
                 {:name "Alice"
                  :email "alice@example.com"}
-                :expires-at #inst "2280-01-01T00:00:00Z"))
+                 :expires-at #inst "2280-01-01T00:00:00Z"))
 
 ;; engram1 => {:id 1
 ;;             :key "alice"
@@ -96,7 +95,7 @@ Each call to `memorize!` creates a new engram, even when using the same key. Thi
                 "alice"
                 {:name "Alice Miller"
                  :email "alice.miller@example.org"}
-                :expires-at #inst "2061-12-31T00:00:00Z"))
+                 :expires-at #inst "2061-12-31T00:00:00Z"))
 
 ;; engram2 => {:id 2
 ;;             :key "alice"
@@ -157,9 +156,9 @@ The `reconsolidate!` function iterates over engrams and applies a transformation
   "Transformation function that applies different decay stages"
   [engram]
   (case (:decay-level engram)
-    ;; Level 0: Remove email
+    ;; Level 0: Overwrite email
     0 (-> engram
-          (update :data dissoc :email)
+          (update :data assoc :email "XXXXXX")
           (update :decay-level inc))
     
     ;; Level 1: Remove all details except name
@@ -170,11 +169,11 @@ The `reconsolidate!` function iterates over engrams and applies a transformation
     ;; Otherwise: no changes
     :retrograde.core/skip))
 
-;; Apply transformation to all expired engrams
+;; Apply transformation
 (rg/reconsolidate!
   store
   decay-by-level
-  :filter {:expires-after (java.time.Instant/now)})
+  :filter {:key ["alice"]})
 ```
 
 The transformation function receives the complete engram and decides what action to take based on its state. This is particularly useful for implementing multi-stage decay strategies where memories progressively degrade over time.
