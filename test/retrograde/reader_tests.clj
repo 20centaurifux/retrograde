@@ -1,6 +1,8 @@
 (ns retrograde.reader-tests
-  (:require [clojure.test :refer [testing is]]
-            [retrograde.core :as rg]))
+  (:require [clojure.spec.alpha :as s]
+            [clojure.test :refer [testing is]]
+            [retrograde.core :as rg]
+            [retrograde.specs :as specs]))
 
 (defn test-open-read
   [store]
@@ -25,6 +27,15 @@
 
 (defn test-read-engram
   [store]
+  (testing "returns valid engram"
+    (let [engram (rg/memorize! store
+                               "test-key"
+                               {:x 1}
+                               :expires-at (java.time.Instant/now))]
+      (with-open [reader (rg/open-read store)]
+        (let [result (rg/read-engram reader (:id engram))]
+          (is (s/valid? ::specs/engram result))))))
+
   (testing "returns nil for non-existent id"
     (with-open [reader (rg/open-read store)]
       (is (nil? (rg/read-engram reader 999999)))))
@@ -48,6 +59,21 @@
 
 (defn test-stream-engrams
   [store]
+  (testing "streams valid engrams"
+    (let [data1 {:content "first"}
+          data2 {:content "second"}]
+      (rg/clear-all! store)
+      (rg/memorize! store "key1" data1)
+      (rg/memorize! store "key2" data2)
+      (with-open [reader (rg/open-read store)]
+        (let [result (rg/stream-engrams reader
+                                        (map identity)
+                                        conj
+                                        []
+                                        {})]
+          (is (= 2 (count result)))
+          (is (every? #(s/valid? ::specs/engram %) result))))))
+
   (testing "streams empty result set"
     (rg/clear-all! store)
     (with-open [reader (rg/open-read store)]
@@ -62,7 +88,6 @@
     (let [data1 {:content "first"}
           data2 {:content "second"}
           data3 {:content "third"}]
-      ;; Create test engrams
       (rg/clear-all! store)
       (rg/memorize! store "key1" data1)
       (rg/memorize! store "key2" data2)

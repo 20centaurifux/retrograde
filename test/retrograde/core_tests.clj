@@ -7,19 +7,11 @@
             [spy.assert :as assert]
             [spy.protocol :as p]))
 
-;;; Generators
-
-(def ^:private hex-char-gen
-  (gen/elements [\0 \1 \2 \3 \4 \5 \6 \7 \8 \9 \a \b \c \d \e \f]))
-
-(def ^:private  hex-string-gen
-  (gen/fmap #(apply str %) (gen/vector hex-char-gen 32)))
-
 ;;; Helpers
 
 (defn- ->mem-rep-id
   []
-  (gen/generate hex-string-gen))
+  (gen/generate (s/gen ::specs/mem-rep-id)))
 
 ;; Builds record fixtures with generated defaults while allowing tests to pin
 ;; the fields that are relevant for the behavior under test.
@@ -39,6 +31,12 @@
       :created created
       :decay-level decay-level
       :expires-at expires-at})))
+
+(defn- record->engram
+  [record mem-rep]
+  (-> record
+      (dissoc :mem-rep-id)
+      (assoc :data mem-rep)))
 
 ;;; Predicates Tests
 
@@ -270,8 +268,8 @@
           mem-rep1 {:x 1}
           record2 (->record 2)
           mem-rep2 {:x 2}
-          new-mem-rep-id1 (gen/generate hex-string-gen)
-          new-mem-rep-id2 (gen/generate hex-string-gen)
+          new-mem-rep-id1 (->mem-rep-id)
+          new-mem-rep-id2 (->mem-rep-id)
           f (fn [engram]
               (assoc-in engram
                         [:data :x]

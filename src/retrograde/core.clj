@@ -1,23 +1,9 @@
 (ns retrograde.core
-  (:require [retrograde.specs :as specs]
-            [clojure.spec.alpha :as s]
-            [clojure.core.cache :as cache]))
+  (:require [clojure.spec.alpha :as s]
+            [clojure.core.cache :as cache]
+            [retrograde.specs :as specs]))
 
 (def ^:private mem-rep-cache-threshold 100)
-
-;;; Conversion
-
-(defn record->engram
-  [record mem-rep]
-  (-> record
-      (dissoc :mem-rep-id)
-      (assoc :data mem-rep)))
-
-(defn engram->record
-  [engram mem-rep-id]
-  (-> engram
-      (dissoc :data)
-      (assoc :mem-rep-id mem-rep-id)))
 
 ;;; Protocols
 
@@ -129,7 +115,9 @@
     (let [mem-rep-id (put-mem-rep! w mem-rep)
           record (create-record! w k mem-rep-id expires-at)]
       (commit! w)
-      (record->engram record mem-rep))))
+      (-> record
+          (dissoc :mem-rep-id)
+          (assoc :data mem-rep)))))
 
 (defn recall
   "Retrieves an engram from the store by its ID.
@@ -248,7 +236,9 @@
            (fn [{:keys [count cache] :as state}
                 {:keys [mem-rep-id] :as record}]
              (let [[mem-rep cache'] (lookup-mem-rep w cache mem-rep-id)
-                   old-engram (record->engram record mem-rep)
+                   old-engram (-> record
+                                  (dissoc :mem-rep-id)
+                                  (assoc :data mem-rep))
                    new-engram (f old-engram)]
                (if (= new-engram ::skip)
                  (assoc state :cache cache')
@@ -261,8 +251,11 @@
                    (when (not= (:id old-engram) (:id new-engram))
                      (throw (ex-info "Engram ID has changed"
                                      {:old old-engram :new new-engram})))
+
                    (let [mem-rep-id' (put-mem-rep! w (:data new-engram))]
-                     (update-record! w (engram->record new-engram mem-rep-id'))
+                     (update-record! w (-> new-engram
+                                           (dissoc :data)
+                                           (assoc :mem-rep-id mem-rep-id')))
                      {:count (inc count)
                       :cache (cache/miss cache'
                                          mem-rep-id'

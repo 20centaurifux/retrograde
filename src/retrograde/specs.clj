@@ -1,5 +1,6 @@
 (ns retrograde.specs
-  (:require [clojure.spec.alpha :as s]))
+  (:require [clojure.spec.alpha :as s]
+            [clojure.test.check.generators :as gen]))
 
 ;;; engrams
 
@@ -21,6 +22,27 @@
                                  ::created
                                  ::decay-level]
                         :opt-un [::expires-at]))
+
+;;; records
+
+(defn- mem-rep-id-gen
+  []
+  (gen/fmap #(apply str %)
+            (gen/vector (gen/elements [\0 \1 \2 \3 \4 \5 \6 \7 \8 \9 \a \b \c \d \e \f])
+                        64)))
+
+(s/def ::mem-rep-id
+  (s/with-gen
+    (s/and string?
+           #(boolean (re-matches #"[0-9a-fA-F]+" %)))
+    mem-rep-id-gen))
+
+(s/def ::record (s/keys :req-un [::id
+                                 ::key
+                                 ::mem-rep-id
+                                 ::created
+                                 ::decay-level
+                                 ::expires-at]))
 
 ;;; filter
 

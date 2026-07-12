@@ -4,11 +4,11 @@
   :license {:name "AGPLv3"
             :url "https://www.gnu.org/licenses/agpl-3.0"}
   :dependencies [[org.clojure/clojure "1.11.1"]
+                 [org.clojure/test.check "1.1.3"]
                  [com.github.seancorfield/next.jdbc "1.3.1118"]
                  [com.github.seancorfield/honeysql "2.7.1399"]]
   :target-path "target/%s"
   :aot nil
   :profiles {:test {:dependencies [[org.clojure/core.cache "1.2.263"]
-                                   [org.clojure/test.check "1.1.3"]
                                    [org.xerial/sqlite-jdbc "3.53.2.0"]
                                    [tortue/spy "2.15.0"]]}})
