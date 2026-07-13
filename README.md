@@ -53,7 +53,7 @@ Here's a quick example of setting up Retrograde with a SQLite database:
 (def store-opts {:sql honeysql-opts
                  :tables table-names})
 
-(def ds {:dbtype "sqlite" :dbname "retrograde.db"})
+(def ds {:dbtype "sqlite" :dbname "retrograde.db?foreign_keys=on"})
 
 (def store (->Store ds store-opts))
 

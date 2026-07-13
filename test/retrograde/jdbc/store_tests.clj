@@ -22,7 +22,7 @@
 (defn- sqlite-fixture
   [f]
   (let [ds {:dbtype "sqlite"
-            :dbname "file::memory:?cache=shared"}]
+            :dbname "file::memory:?cache=shared&foreign_keys=on"}]
     (with-open [_ (jdbc/get-connection ds)]
       (binding [store (->Store ds opts)]
         (init store)
