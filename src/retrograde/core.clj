@@ -101,7 +101,8 @@
   Parameters:
   - `store`: The store to write to
   - `k`: A key string to identify the engram (max 100 characters)
-  - `mem-rep`: The data/memory representation to store
+  - `mem-rep`: The data/memory representation to store. It must be serializable
+               with `clojure.core/pr-str` and readable with `clojure.edn/read-string`.
   - `expires-at`: Optional keyword argument, an Instant when the engram expires
   
   Returns the created engram map with :id, :key, :data, :created, :expires-at,
