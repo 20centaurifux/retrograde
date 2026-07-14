@@ -36,6 +36,16 @@
       (dissoc :mem-rep-id)
       (assoc :data mem-rep)))
 
+(defmacro ^:private spec-violation-thrown?
+  [expected-msg expected-val & body]
+  `(try
+     (do ~@body)
+     (is false "Expected ex-info to be thrown")
+     (catch clojure.lang.ExceptionInfo e#
+       (is (= ~expected-msg (.getMessage e#)))
+       (is (= ~expected-val
+              (-> e# ex-data :explain ::s/problems first :val))))))
+
 ;;; Tests
 
 ;; Predicates
@@ -301,7 +311,28 @@
       (assert/called-once-with? (:put-mem-rep! spy) writer mem-rep)
       (assert/called-once-with? (:create-record! spy) writer k mem-rep-id nil)
       (assert/called-once-with? (:commit! spy) writer)
-      (assert/not-called? (:rollback! spy)))))
+      (assert/not-called? (:rollback! spy))))
+
+  (testing "throws ex-info when k is not a valid key"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid key"
+       :not-a-key
+       (memorize! store :not-a-key {}))))
+
+  (testing "throws ex-info when mem-rep is not a valid memory representation"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid memory representation"
+       nil
+       (memorize! store "k" nil))))
+
+  (testing "throws ex-info when expires-at is not a valid instant"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid expiry date"
+       :not-an-instant
+       (memorize! store "k" {} :expires-at :not-an-instant)))))
 
 (deftest test-recall
   (testing "engram found"
@@ -324,7 +355,14 @@
           match (recall store 1)]
       (is (nil? match))
 
-      (assert/called-once-with? (:read-engram spy) reader 1))))
+      (assert/called-once-with? (:read-engram spy) reader 1)))
+
+  (testing "throws ex-info when id is not a valid id"
+    (let [store (->ReaderStore (reader))]
+      (spec-violation-thrown?
+       "Invalid id"
+       :not-an-id
+       (recall store :not-an-id)))))
 
 ;; Streaming
 
@@ -356,7 +394,36 @@
                                 conj
                                 []
                                 {:order [[:key :asc]]
-                                 :filter {:key ["a" "b" "c"]}}))))
+                                 :filter {:key ["a" "b" "c"]}})))
+
+  (testing "throws ex-info when xform is not a function"
+    (let [store (->ReaderStore (reader))]
+      (spec-violation-thrown?
+       "Invalid transducer"
+       :not-a-function
+       (transduce-engrams store :not-a-function conj []))))
+
+  (testing "throws ex-info when reducing function is not a function"
+    (let [store (->ReaderStore (reader))]
+      (spec-violation-thrown?
+       "Invalid reducing function"
+       :not-a-function
+       (transduce-engrams store (map identity) :not-a-function []))))
+
+  (testing "throws ex-info when filter is invalid"
+    (let [store (->ReaderStore (reader))]
+      (spec-violation-thrown?
+       "Invalid filter"
+       :not-a-filter
+       (transduce-engrams store (map identity) conj [] {:filter :not-a-filter}))))
+
+  (testing "throws ex-info when order is invalid"
+    (let [store (->ReaderStore (reader))]
+      (spec-violation-thrown?
+       "Invalid order"
+       :not-an-order
+       (transduce-engrams store (map identity) conj [] {:order :not-an-order})))))
+
 ;; Altering
 
 (deftest test-reconsolidate!
@@ -718,4 +785,25 @@
                                 writer
                                 (assoc record :mem-rep-id new-mem-rep-id))
       (assert/called-once-with? (:commit! spy) writer)
-      (assert/not-called? (:rollback! spy)))))
+      (assert/not-called? (:rollback! spy))))
+
+  (testing "throws ex-info when transformation function is not a function"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid transformation function"
+       :not-a-function
+       (reconsolidate! store :not-a-function))))
+
+  (testing "throws ex-info when filter is invalid"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid filter"
+       :not-a-filter
+       (reconsolidate! store (constantly 1) {:filter :not-a-filter}))))
+
+  (testing "throws ex-info when order is invalid"
+    (let [store (->WriterStore (writer))]
+      (spec-violation-thrown?
+       "Invalid order"
+       :not-an-order
+       (reconsolidate! store (constantly 1) {:order :not-an-order})))))

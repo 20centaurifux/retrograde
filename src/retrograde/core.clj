@@ -5,7 +5,7 @@
 
 (def ^:private mem-rep-cache-threshold 100)
 
-;;;; Protocols
+;;; Protocols
 
 (defprotocol Store
   "Protocol for persistent engram storage.
@@ -92,12 +92,10 @@
     
     Returns the final accumulator value."))
 
-;;;; Public API
+;;; Public API
 
-;;; Transaction Helpers
+;; Transaction Helpers
 
-;; Rolls back after a failed write while preserving the original exception.
-;; If rollback itself fails, that error is attached as suppressed context.
 (defn- rollback!-safely-and-throw
   [w cause]
   (try
@@ -116,7 +114,15 @@
        (commit! ~w)
        result#)))
 
-;;; Clear Storage
+;; Validation Helpers
+
+(defn- throw-if-invalid
+  [spec value msg]
+  (when-not (s/valid? spec value)
+    (throw (ex-info msg
+                    {:explain (s/explain-data spec value)}))))
+
+;; Clear Storage
 
 (defn clear-all!
   "Deletes all engrams from the store.
@@ -127,7 +133,7 @@
   (with-write-transaction [w store]
     (delete-all! w)))
 
-;;; Direct Engram Access
+;; Direct Engram Access
 
 (defn memorize!
   "Stores a new engram in the store.
@@ -142,10 +148,11 @@
   Returns the created engram map with :id, :key, :data, :created, :expires-at,
   and :decay-level fields."
   [store k mem-rep & {:keys [expires-at]}]
-  {:pre [(store? store)
-         (s/valid? ::specs/key k)
-         (s/valid? ::specs/data mem-rep)
-         (s/valid? ::specs/expires-at expires-at)]}
+  {:pre [(store? store)]}
+  (throw-if-invalid ::specs/key k "Invalid key")
+  (throw-if-invalid ::specs/data mem-rep "Invalid memory representation")
+  (throw-if-invalid ::specs/expires-at expires-at "Invalid expiry date")
+
   (with-write-transaction [w store]
     (let [mem-rep-id (put-mem-rep! w mem-rep)
           record (create-record! w k mem-rep-id expires-at)]
@@ -162,12 +169,13 @@
   
   Returns the engram map if found, nil otherwise."
   [store id]
-  {:pre [(store? store)
-         (s/valid? ::specs/id id)]}
+  {:pre [(store? store)]}
+  (throw-if-invalid ::specs/id id "Invalid id")
+
   (with-open [r (open-read store)]
     (read-engram r id)))
 
-;;; Streaming
+;; Streaming
 
 (defn- ->query [filter order]
   (cond-> {}
@@ -199,15 +207,16 @@
     (transduce-engrams store (map :key) conj [] :filter {:key [\"key1\" \"key2\"]})"
   [store xform f init & {:keys [filter order]
                          :or {order [[:key :asc] [:created :asc]]}}]
-  {:pre [(store? store)
-         (fn? xform)
-         (fn? f)
-         (s/valid? (s/nilable ::specs/filter) filter)
-         (s/valid? ::specs/order order)]}
+  {:pre [(store? store)]}
+  (throw-if-invalid fn? xform "Invalid transducer")
+  (throw-if-invalid fn? f "Invalid reducing function")
+  (throw-if-invalid (s/nilable ::specs/filter) filter "Invalid filter")
+  (throw-if-invalid ::specs/order order "Invalid order")
+
   (with-open [r (open-read store)]
     (stream-engrams r xform f init (->query filter order))))
 
-;;; Altering
+;; Altering
 
 (defn- lookup-mem-rep [w cache mem-rep-id]
   (if (cache/has? cache mem-rep-id)
@@ -268,10 +277,11 @@
       :order [[:expires-at :asc]])"
   [store f & {:keys [filter order]
               :or {order [[:created :asc]]}}]
-  {:pre [(store? store)
-         (fn? f)
-         (s/valid? (s/nilable ::specs/filter) filter)
-         (s/valid? ::specs/order order)]}
+  {:pre [(store? store)]}
+  (throw-if-invalid fn? f "Invalid transformation function")
+  (throw-if-invalid (s/nilable ::specs/filter) filter "Invalid filter")
+  (throw-if-invalid ::specs/order order "Invalid order")
+
   (with-write-transaction [w store]
     (->> (->query filter order)
          (reduce-records
