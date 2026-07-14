@@ -40,7 +40,46 @@
   (testing "closed Writer throws Exception"
     (let [writer (open-write store)]
       (.close writer)
-      (is (thrown? Exception (commit! writer))))))
+      (is (thrown? Exception (commit! writer)))))
+
+  (testing "committed change is persisted"
+    (let [data {:foo "bar"}
+          record (with-open [writer (open-write store)]
+                   (let [mem-rep-id (put-mem-rep! writer data)
+                         record (create-record! writer "test-key" mem-rep-id nil)]
+                     (commit! writer)
+                     record))]
+      (with-open [reader (open-read store)]
+        (let [result (read-engram reader (:id record))]
+          (is (= (:id record) (:id result)))
+          (is (= (:key record) (:key result)))
+          (is (= data (:data result)))
+          (is (= (:decay-level record) (:decay-level result))))))))
+
+(defn test-rollback!
+  [store]
+  (testing "returns nil"
+    (with-open [writer (open-write store)]
+      (is (nil? (rollback! writer)))))
+
+  (testing "Writer is not closed"
+    (with-open [writer (open-write store)]
+      (rollback! writer)
+      (is (not (closed? writer)))))
+
+  (testing "closed Writer throws Exception"
+    (let [writer (open-write store)]
+      (.close writer)
+      (is (thrown? Exception (rollback! writer)))))
+
+  (testing "rolled back change is not persisted"
+    (let [record (with-open [writer (open-write store)]
+                   (let [mem-rep-id (put-mem-rep! writer {:foo "bar"})
+                         record (create-record! writer "test-key" mem-rep-id nil)]
+                     (rollback! writer)
+                     record))]
+      (with-open [reader (open-read store)]
+        (is (nil? (read-engram reader (:id record))))))))
 
 (defn test-delete-all!
   [store]
@@ -228,6 +267,24 @@
             read-back (read-record writer (:id updated))]
         (is (= read-back updated)))))
 
+  (testing "ignores changes to created timestamp"
+    (with-open [writer (open-write store)]
+      (let [data {:foo "bar"}
+            mem-rep-id (put-mem-rep! writer data)
+            created (create-record! writer "test-key" mem-rep-id nil)
+            changed-created (java.time.Instant/ofEpochSecond 1)
+            updated (update-record! writer (assoc created
+                                                  :created changed-created
+                                                  :key "updated-key"
+                                                  :decay-level 1))
+            read-back (read-record writer (:id created))]
+        (is (= (->epoch (:created created))
+               (->epoch (:created updated))))
+        (is (= (->epoch (:created created))
+               (->epoch (:created read-back))))
+        (is (= "updated-key" (:key updated)))
+        (is (= 1 (:decay-level updated))))))
+
   (testing "return nil if id does not exist"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
@@ -246,14 +303,14 @@
   (testing "returns valid records"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "test-key" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc result]
-                                     (conj acc result))
-                                   []
-                                   {})]
-        (is (s/valid? ::specs/record (first result))))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "test-key" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc result]
+                                       (conj acc result))
+                                     []
+                                     {})]
+          (is (s/valid? ::specs/record (first result)))))))
 
   (testing "reduces over empty result set"
     (with-open [writer (open-write store)]
@@ -267,76 +324,76 @@
   (testing "reduces over all records without filter"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            _ (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {})]
-        (is (= 3 (count result)))
-        (is (= #{"key1" "key2" "key3"} (set result))))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (create-record! writer "key2" mem-rep-id nil)
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {})]
+          (is (= 3 (count result)))
+          (is (= #{"key1" "key2" "key3"} (set result)))))))
 
   (testing "filter by id - single id"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
             mem-rep-id (put-mem-rep! writer data)
-            rec1 (create-record! writer "key1" mem-rep-id nil)
-            _ (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record] (conj acc (:key record)))
-                                   []
-                                   {:filter {:id [(:id rec1)]}})]
-        (is (= 1 (count result)))
-        (is (= ["key1"] result)))))
+            rec1 (create-record! writer "key1" mem-rep-id nil)]
+        (create-record! writer "key2" mem-rep-id nil)
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record] (conj acc (:key record)))
+                                     []
+                                     {:filter {:id [(:id rec1)]}})]
+          (is (= 1 (count result)))
+          (is (= ["key1"] result))))))
 
   (testing "filter by id - multiple ids"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
             mem-rep-id (put-mem-rep! writer data)
             rec1 (create-record! writer "key1" mem-rep-id nil)
-            rec2 (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:id [(:id rec1) (:id rec2)]}})]
-        (is (= 2 (count result)))
-        (is (= #{"key1" "key2"} (set result))))))
+            rec2 (create-record! writer "key2" mem-rep-id nil)]
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:id [(:id rec1) (:id rec2)]}})]
+          (is (= 2 (count result)))
+          (is (= #{"key1" "key2"} (set result)))))))
 
   (testing "filter by key - single key"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            _ (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:key ["key2"]}})]
-        (is (= 1 (count result)))
-        (is (= ["key2"] result)))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (create-record! writer "key2" mem-rep-id nil)
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:key ["key2"]}})]
+          (is (= 1 (count result)))
+          (is (= ["key2"] result))))))
 
   (testing "filter by key - multiple keys"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            _ (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:key ["key1" "key3"]}})]
-        (is (= 2 (count result)))
-        (is (= #{"key1" "key3"} (set result))))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (create-record! writer "key2" mem-rep-id nil)
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:key ["key1" "key3"]}})]
+          (is (= 2 (count result)))
+          (is (= #{"key1" "key3"} (set result)))))))
 
   (testing "filter by expires-until"
     (with-open [writer (open-write store)]
@@ -346,17 +403,17 @@
             future1 (.plusSeconds now 3600)
             future2 (.plusSeconds now 7200)
             future3 (.plusSeconds now 10800)
-            _ (create-record! writer "key1" mem-rep-id future1)
-            _ (create-record! writer "key2" mem-rep-id future2)
-            _ (create-record! writer "key3" mem-rep-id future3)
-            cutoff (.plusSeconds now 7200)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:expires-until cutoff}})]
-        (is (= 2 (count result)))
-        (is (= #{"key1" "key2"} (set result))))))
+            cutoff (.plusSeconds now 7200)]
+        (create-record! writer "key1" mem-rep-id future1)
+        (create-record! writer "key2" mem-rep-id future2)
+        (create-record! writer "key3" mem-rep-id future3)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:expires-until cutoff}})]
+          (is (= 2 (count result)))
+          (is (= #{"key1" "key2"} (set result)))))))
 
   (testing "filter by expires-after"
     (with-open [writer (open-write store)]
@@ -366,17 +423,17 @@
             future1 (.plusSeconds now 3600)
             future2 (.plusSeconds now 7200)
             future3 (.plusSeconds now 10800)
-            _ (create-record! writer "key1" mem-rep-id future1)
-            _ (create-record! writer "key2" mem-rep-id future2)
-            _ (create-record! writer "key3" mem-rep-id future3)
-            cutoff (.plusSeconds now 7200)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:expires-after cutoff}})]
-        (is (= 2 (count result)))
-        (is (= #{"key2" "key3"} (set result))))))
+            cutoff (.plusSeconds now 7200)]
+        (create-record! writer "key1" mem-rep-id future1)
+        (create-record! writer "key2" mem-rep-id future2)
+        (create-record! writer "key3" mem-rep-id future3)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:expires-after cutoff}})]
+          (is (= 2 (count result)))
+          (is (= #{"key2" "key3"} (set result)))))))
 
   (testing "filter by expires-until and expires-after (range)"
     (with-open [writer (open-write store)]
@@ -386,35 +443,35 @@
             future1 (.plusSeconds now 3600)
             future2 (.plusSeconds now 7200)
             future3 (.plusSeconds now 10800)
-            future4 (.plusSeconds now 14400)
-            _ (create-record! writer "key1" mem-rep-id future1)
-            _ (create-record! writer "key2" mem-rep-id future2)
-            _ (create-record! writer "key3" mem-rep-id future3)
-            _ (create-record! writer "key4" mem-rep-id future4)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:expires-after (.plusSeconds now 6000)
-                                             :expires-until (.plusSeconds now 12000)}})]
-        (is (= 2 (count result)))
-        (is (= #{"key2" "key3"} (set result))))))
+            future4 (.plusSeconds now 14400)]
+        (create-record! writer "key1" mem-rep-id future1)
+        (create-record! writer "key2" mem-rep-id future2)
+        (create-record! writer "key3" mem-rep-id future3)
+        (create-record! writer "key4" mem-rep-id future4)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:expires-after (.plusSeconds now 6000)
+                                               :expires-until (.plusSeconds now 12000)}})]
+          (is (= 2 (count result)))
+          (is (= #{"key2" "key3"} (set result)))))))
 
   (testing "combined filters - id and key"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
             mem-rep-id (put-mem-rep! writer data)
             rec1 (create-record! writer "key1" mem-rep-id nil)
-            rec2 (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:id record)))
-                                   []
-                                   {:filter {:id [(:id rec1) (:id rec2)]
-                                             :key ["key1"]}})]
-        (is (= 1 (count result)))
-        (is (= [(:id rec1)] result)))))
+            rec2 (create-record! writer "key2" mem-rep-id nil)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:id record)))
+                                     []
+                                     {:filter {:id [(:id rec1) (:id rec2)]
+                                               :key ["key1"]}})]
+          (is (= 1 (count result)))
+          (is (= [(:id rec1)] result))))))
 
   (testing "order by id ascending"
     (with-open [writer (open-write store)]
@@ -422,13 +479,13 @@
             mem-rep-id (put-mem-rep! writer data)
             rec1 (create-record! writer "key1" mem-rep-id nil)
             rec2 (create-record! writer "key2" mem-rep-id nil)
-            rec3 (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:id record)))
-                                   []
-                                   {:order [[:id :asc]]})]
-        (is (= [(:id rec1) (:id rec2) (:id rec3)] result)))))
+            rec3 (create-record! writer "key3" mem-rep-id nil)]
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:id record)))
+                                     []
+                                     {:order [[:id :asc]]})]
+          (is (= [(:id rec1) (:id rec2) (:id rec3)] result))))))
 
   (testing "order by id descending"
     (with-open [writer (open-write store)]
@@ -436,122 +493,143 @@
             mem-rep-id (put-mem-rep! writer data)
             rec1 (create-record! writer "key1" mem-rep-id nil)
             rec2 (create-record! writer "key2" mem-rep-id nil)
-            rec3 (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:id record)))
-                                   []
-                                   {:order [[:id :desc]]})]
-        (is (= [(:id rec3) (:id rec2) (:id rec1)] result)))))
+            rec3 (create-record! writer "key3" mem-rep-id nil)]
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:id record)))
+                                     []
+                                     {:order [[:id :desc]]})]
+          (is (= [(:id rec3) (:id rec2) (:id rec1)] result))))))
 
   (testing "order by key"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "zebra" mem-rep-id nil)
-            _ (create-record! writer "alpha" mem-rep-id nil)
-            _ (create-record! writer "delta" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:order [[:key :asc]]})]
-        (is (= ["alpha" "delta" "zebra"] result)))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "zebra" mem-rep-id nil)
+        (create-record! writer "alpha" mem-rep-id nil)
+        (create-record! writer "delta" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:order [[:key :asc]]})]
+          (is (= ["alpha" "delta" "zebra"] result))))))
 
   (testing "order by created"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            _ (create-record! writer "key2" mem-rep-id nil)
-            _ (create-record! writer "key3" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:order [[:created :asc]]})]
-        (is (= ["key1" "key2" "key3"] result)))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (Thread/sleep 1001)
+        (create-record! writer "key2" mem-rep-id nil)
+        (Thread/sleep 1001)
+        (create-record! writer "key3" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:order [[:created :asc]]})]
+          (is (= ["key1" "key2" "key3"] result))))))
 
   (testing "order by expires-at"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
             mem-rep-id (put-mem-rep! writer data)
-            now (java.time.Instant/now)
-            _ (create-record! writer "key3" mem-rep-id (.plusSeconds now 10800))
-            _ (create-record! writer "key1" mem-rep-id (.plusSeconds now 3600))
-            _ (create-record! writer "key2" mem-rep-id (.plusSeconds now 7200))
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:order [[:expires-at :asc]]})]
-        (is (= ["key1" "key2" "key3"] result)))))
+            now (java.time.Instant/now)]
+        (create-record! writer "key3" mem-rep-id (.plusSeconds now 10800))
+        (create-record! writer "key1" mem-rep-id (.plusSeconds now 3600))
+        (create-record! writer "key2" mem-rep-id (.plusSeconds now 7200))
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:order [[:expires-at :asc]]})]
+          (is (= ["key1" "key2" "key3"] result))))))
 
   (testing "order by multiple columns"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "beta" mem-rep-id nil)
-            _ (create-record! writer "alpha" mem-rep-id nil)
-            _ (create-record! writer "beta" mem-rep-id nil)
-            _ (create-record! writer "alpha" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc [(:key record) (:id record)]))
-                                   []
-                                   {:order [[:key :asc] [:id :asc]]})]
-        (is (= 4 (count result)))
-        (is (= "alpha" (first (first result))))
-        (is (= "alpha" (first (second result))))
-        (is (= "beta" (first (nth result 2))))
-        (is (= "beta" (first (nth result 3))))
-        ;; IDs should be in ascending order within same key
-        (is (< (second (first result)) (second (second result))))
-        (is (< (second (nth result 2)) (second (nth result 3)))))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "beta" mem-rep-id nil)
+        (create-record! writer "alpha" mem-rep-id nil)
+        (create-record! writer "beta" mem-rep-id nil)
+        (create-record! writer "alpha" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc [(:key record) (:id record)]))
+                                     []
+                                     {:order [[:key :asc] [:id :asc]]})]
+          (is (= 4 (count result)))
+          (is (= "alpha" (first (first result))))
+          (is (= "alpha" (first (second result))))
+          (is (= "beta" (first (nth result 2))))
+          (is (= "beta" (first (nth result 3))))
+          ;; IDs should be in ascending order within same key
+          (is (< (second (first result)) (second (second result))))
+          (is (< (second (nth result 2)) (second (nth result 3))))))))
 
   (testing "filter and order combined"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "zebra" mem-rep-id nil)
-            _ (create-record! writer "alpha" mem-rep-id nil)
-            _ (create-record! writer "delta" mem-rep-id nil)
-            _ (create-record! writer "beta" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc record]
-                                     (conj acc (:key record)))
-                                   []
-                                   {:filter {:key ["alpha" "delta" "beta"]}
-                                    :order [[:key :desc]]})]
-        (is (= ["delta" "beta" "alpha"] result)))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "zebra" mem-rep-id nil)
+        (create-record! writer "alpha" mem-rep-id nil)
+        (create-record! writer "delta" mem-rep-id nil)
+        (create-record! writer "beta" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc record]
+                                       (conj acc (:key record)))
+                                     []
+                                     {:filter {:key ["alpha" "delta" "beta"]}
+                                      :order [[:key :desc]]})]
+          (is (= ["delta" "beta" "alpha"] result))))))
 
   (testing "uses init value correctly"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
-            mem-rep-id (put-mem-rep! writer data)
-            _ (create-record! writer "key1" mem-rep-id nil)
-            result (reduce-records writer
-                                   (fn [acc _]
-                                     (+ acc 1))
-                                   100
-                                   {})]
-        (is (= 101 result)))))
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "key1" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn [acc _]
+                                       (+ acc 1))
+                                     100
+                                     {})]
+          (is (= 101 result))))))
+
+  (testing "supports early termination"
+    (with-open [writer (open-write store)]
+      (let [data {:foo "bar"}
+            seen (atom [])
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "first" mem-rep-id nil)
+        (create-record! writer "second" mem-rep-id nil)
+        (create-record! writer "third" mem-rep-id nil)
+        (let [result (reduce-records writer
+                                     (fn
+                                       ([acc] acc)
+                                       ([acc record]
+                                        (swap! seen conj (:key record))
+                                        (reduced (conj acc (:key record)))))
+                                     []
+                                     {:order [[:key :asc]]})]
+          (is (= ["first"] result))
+          (is (= ["first"] @seen))))))
 
   (testing "reducing function receives proper record structure"
     (with-open [writer (open-write store)]
       (let [data {:foo "bar"}
             mem-rep-id (put-mem-rep! writer data)
             expires-at (java.time.Instant/now)
-            created (create-record! writer "test-key" mem-rep-id expires-at)
-            result (reduce-records writer
-                                   (fn [_ record]
-                                     record)
-                                   nil
-                                   {:filter {:id [(:id created)]}})]
-        (is (some? result))
-        (is (= (:id created) (:id result)))
-        (is (= "test-key" (:key result)))
-        (is (= mem-rep-id (:mem-rep-id result)))
-        (is (zero? (:decay-level result)))
-        (is (instance? java.time.Instant (:created result)))
-        (is (instance? java.time.Instant (:expires-at result)))))))
+            created (create-record! writer "test-key" mem-rep-id expires-at)]
+        (let [result (reduce-records writer
+                                     (fn [_ record]
+                                       record)
+                                     nil
+                                     {:filter {:id [(:id created)]}})]
+          (is (some? result))
+          (is (= (:id created) (:id result)))
+          (is (= "test-key" (:key result)))
+          (is (= mem-rep-id (:mem-rep-id result)))
+          (is (zero? (:decay-level result)))
+          (is (instance? java.time.Instant (:created result)))
+          (is (instance? java.time.Instant (:expires-at result))))))))

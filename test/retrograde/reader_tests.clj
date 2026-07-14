@@ -56,7 +56,6 @@
           (is (= (.getEpochSecond (:expires-at engram)) (.getEpochSecond (:expires-at result))))
           (is (= 0 (:decay-level result))))))))
 
-
 (defn test-stream-engrams
   [store]
   (testing "streams valid engrams"
@@ -272,6 +271,26 @@
                                         {})]
           (is (= 3 (count result)))
           (is (every? #(= % 42) result))))))
+
+  (testing "supports early termination"
+    (let [data {:value 42}
+          seen (atom [])]
+      (rg/clear-all! store)
+      (rg/memorize! store "first" data)
+      (rg/memorize! store "second" data)
+      (rg/memorize! store "third" data)
+      (with-open [reader (rg/open-read store)]
+        (let [result (rg/stream-engrams reader
+                                        (map :key)
+                                        (fn
+                                          ([acc] acc)
+                                          ([acc k]
+                                           (swap! seen conj k)
+                                           (reduced (conj acc k))))
+                                        []
+                                        {:order [[:key :asc]]})]
+          (is (= ["first"] result))
+          (is (= ["first"] @seen))))))
 
   (testing "streams engram data correctly"
     (let [test-data {:complex {:nested "value"}

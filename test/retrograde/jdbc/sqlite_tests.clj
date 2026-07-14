@@ -1,4 +1,4 @@
-(ns retrograde.jdbc.store-tests
+(ns retrograde.jdbc.sqlite-tests
   (:require [clojure.test :refer [use-fixtures deftest]]
             [retrograde.core :refer [init Store]]
             [retrograde.jdbc.core :refer [->Store]]
@@ -40,6 +40,9 @@
 
 (deftest test-writer_commit!
   (wt/test-commit! store))
+
+(deftest test-writer_rollback!
+  (wt/test-rollback! store))
 
 (deftest test-writer_delete-all!
   (wt/test-delete-all! store))

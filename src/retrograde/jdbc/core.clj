@@ -32,7 +32,7 @@
   (fn [dbtype _relation _id _data] dbtype))
 
 (defmethod insert-mem-rep-if-absent-query :default
-  [_ _ _]
+  [_dbtype _relation _id _data]
   (throw (UnsupportedOperationException. "insert-mem-rep-if-absent-query not implemented")))
 
 (defn- select-mem-rep-query
@@ -150,6 +150,9 @@
   (commit! [_]
     (.commit conn))
 
+  (rg/rollback! [_]
+    (.rollback conn))
+
   (delete-all! [writer]
     (execute-one! writer {:delete-from (:engram tables)})
     (execute-one! writer {:delete-from (:mem-rep tables)})
@@ -238,7 +241,14 @@
   rg/Store
   (init [_]
     (with-open [conn (jdbc/get-connection ds {:auto-commit false})]
-      (run! (partial jdbc/execute-one! conn) (create-tables ds opts))
+      (try
+        (run! (partial jdbc/execute-one! conn) (create-tables ds opts))
+        (catch Throwable e
+          (try
+            (.rollback conn)
+            (catch Throwable rollback-error
+              (.addSuppressed e rollback-error))
+            (finally (throw e)))))
       (.commit conn)))
 
   (open-write [_]

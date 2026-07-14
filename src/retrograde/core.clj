@@ -5,7 +5,7 @@
 
 (def ^:private mem-rep-cache-threshold 100)
 
-;;; Protocols
+;;;; Protocols
 
 (defprotocol Store
   "Protocol for persistent engram storage.
@@ -50,7 +50,14 @@
   "Protocol for writing and modifying engrams in the store."
   (commit! [writer]
     "Commits the current transaction.
-    Must be called to persist changes.")
+    Must be called to persist changes.
+
+    If commit! throws, the exception is propagated and callers should not assume
+    rollback! has been called. Implementations should make closing a writer with
+    an unresolved failed commit safe for their backing store.")
+  (rollback! [writer]
+    "Rolls back the current transaction.
+    Discards any uncommitted changes.")
   (delete-all! [writer]
     "Deletes all engrams from the store.
     Changes are not persisted until commit! is called.")
@@ -70,7 +77,9 @@
     Returns the created record map with :id, :key, :mem-rep-id, :created,
     :expires-at, and :decay-level fields.")
   (update-record! [writer record]
-    "Updates an existing engram record.")
+    "Updates an existing engram record.
+
+    The :created timestamp is immutable and must not be updated.")
   (read-record [writer engram-id]
     "Reads an engram record by ID.")
   (reduce-records [writer f init query]
@@ -83,7 +92,31 @@
     
     Returns the final accumulator value."))
 
-;;; Public API
+;;;; Public API
+
+;;; Transaction Helpers
+
+;; Rolls back after a failed write while preserving the original exception.
+;; If rollback itself fails, that error is attached as suppressed context.
+(defn- rollback!-safely-and-throw
+  [w cause]
+  (try
+    (rollback! w)
+    (catch Throwable rollback-error
+      (.addSuppressed cause rollback-error)))
+  (throw cause))
+
+(defmacro ^:private with-write-transaction
+  [[w store] & body]
+  `(with-open [~w (open-write ~store)]
+     (let [result# (try
+                     (do ~@body)
+                     (catch Throwable e#
+                       (rollback!-safely-and-throw ~w e#)))]
+       (commit! ~w)
+       result#)))
+
+;;; Clear Storage
 
 (defn clear-all!
   "Deletes all engrams from the store.
@@ -91,9 +124,10 @@
   Opens a write transaction, deletes all records, and commits the changes."
   [store]
   {:pre [(store? store)]}
-  (with-open [w (open-write store)]
-    (delete-all! w)
-    (commit! w)))
+  (with-write-transaction [w store]
+    (delete-all! w)))
+
+;;; Direct Engram Access
 
 (defn memorize!
   "Stores a new engram in the store.
@@ -106,16 +140,15 @@
   - `expires-at`: Optional keyword argument, an Instant when the engram expires
   
   Returns the created engram map with :id, :key, :data, :created, :expires-at,
-   and :decay-level fields."
+  and :decay-level fields."
   [store k mem-rep & {:keys [expires-at]}]
   {:pre [(store? store)
          (s/valid? ::specs/key k)
          (s/valid? ::specs/data mem-rep)
          (s/valid? ::specs/expires-at expires-at)]}
-  (with-open [w (open-write store)]
+  (with-write-transaction [w store]
     (let [mem-rep-id (put-mem-rep! w mem-rep)
           record (create-record! w k mem-rep-id expires-at)]
-      (commit! w)
       (-> record
           (dissoc :mem-rep-id)
           (assoc :data mem-rep)))))
@@ -133,6 +166,8 @@
          (s/valid? ::specs/id id)]}
   (with-open [r (open-read store)]
     (read-engram r id)))
+
+;;; Streaming
 
 (defn- ->query [filter order]
   (cond-> {}
@@ -153,14 +188,15 @@
             - `:id` - collection of engram IDs to match
             - `:expires-until` - Instant, selects engrams expiring before this time
             - `:expires-after` - Instant, selects engrams expiring after this time
-  - `order`: Optional keyword argument, a vector of [field direction] tuples (default: [[:key :asc] [:created :asc]])
+  - `order`: Optional keyword argument, a vector of [field direction] tuples
+             (default: [[:key :asc] [:created :asc]])
              Allowed fields: :id, :key, :created, :expires-at
              Allowed directions: :asc, :desc
   
   Returns the result of the transduction.
   
   Example:
-    (transduce-engrams store (map :key) conj [] :filter {:keys [\"key1\" \"key2\"]})"
+    (transduce-engrams store (map :key) conj [] :filter {:key [\"key1\" \"key2\"]})"
   [store xform f init & {:keys [filter order]
                          :or {order [[:key :asc] [:created :asc]]}}]
   {:pre [(store? store)
@@ -171,14 +207,15 @@
   (with-open [r (open-read store)]
     (stream-engrams r xform f init (->query filter order))))
 
-;; Looks up a memory representation with LRU caching. Returns [mem-rep updated-cache].
-;; On cache hit: returns cached data and updates hit statistics.
-;; On cache miss: reads from storage and adds to cache.
+;;; Altering
+
 (defn- lookup-mem-rep [w cache mem-rep-id]
-  (if-let [mem-rep (cache/lookup cache mem-rep-id)]
-    [mem-rep (cache/hit cache mem-rep-id)]
+  (if (cache/has? cache mem-rep-id)
+    [(cache/lookup cache mem-rep-id)
+     (cache/hit cache mem-rep-id)]
     (let [mem-rep (read-mem-rep w mem-rep-id)]
-      [mem-rep (cache/miss cache mem-rep-id mem-rep)])))
+      [mem-rep
+       (cache/miss cache mem-rep-id mem-rep)])))
 
 (defn reconsolidate!
   "Applies a transformation function to selected engrams and updates them in the store.
@@ -186,7 +223,8 @@
   Parameters:
   - `store`: The store to write to
   - `f`: A function that takes an engram and returns either:
-         - An updated engram map (will be saved)
+         - An updated engram map (will be saved). The :created timestamp is immutable
+           and must not be updated.
          - :retrograde.core/skip (engram will be skipped)
   - `filter`: Optional keyword argument, a filter map to select engrams.
             Supported filters:
@@ -194,13 +232,14 @@
             - `:id` - collection of engram IDs to match
             - `:expires-until` - Instant, selects engrams expiring before this time
             - `:expires-after` - Instant, selects engrams expiring after this time
-  - `order`: Optional keyword argument, a vector of [field direction] tuples (default: [[:created :asc]])
+  - `order`: Optional keyword argument, a vector of [field direction] tuples
+             (default: [[:created :asc]])
              Allowed fields: :id, :key, :created, :expires-at
              Allowed directions: :asc, :desc
   
-  The function `f` receives each engram as a full map with :id, :key, :data, :created,
-  :expires-at, and :decay-level fields. It should return an updated engram map or
-   :retrograde.core/skip to skip the update.
+  The function `f` receives each engram as a full map with :id, :key, :data,
+  :created, :expires-at, and :decay-level fields. It should return an updated
+  engram map or :retrograde.core/skip to skip the update.
   
   Returns a vector of the updated engrams. Skipped engrams are not included.
   
@@ -227,42 +266,43 @@
       decay-by-level
       :filter {:expires-until (java.time.Instant/now)}
       :order [[:expires-at :asc]])"
-  [store f & {:keys [filter order] :or {order [[:created :asc]]}}]
-  {:pre [(store? store) (fn? f) (s/valid? (s/nilable ::specs/filter) filter)
+  [store f & {:keys [filter order]
+              :or {order [[:created :asc]]}}]
+  {:pre [(store? store)
+         (fn? f)
+         (s/valid? (s/nilable ::specs/filter) filter)
          (s/valid? ::specs/order order)]}
-  (with-open [w (open-write store)]
-    (let [{:keys [result]}
-          (reduce-records
-           w
-           (fn [{:keys [result cache] :as state}
-                {:keys [mem-rep-id] :as record}]
-             (let [[mem-rep cache'] (lookup-mem-rep w cache mem-rep-id)
-                   old-engram (-> record
-                                  (dissoc :mem-rep-id)
-                                  (assoc :data mem-rep))
-                   new-engram (f old-engram)]
-               (if (= new-engram ::skip)
-                 (assoc state :cache cache')
-                 (do
-                   (when-not (and (not= new-engram ::specs/skip)
-                                  (s/valid? ::specs/engram new-engram))
-                     (throw (ex-info "Invalid engram"
-                                     {:explain (s/explain-data ::specs/engram new-engram)})))
+  (with-write-transaction [w store]
+    (->> (->query filter order)
+         (reduce-records
+          w
+          (fn [{:keys [result cache] :as state}
+               {:keys [mem-rep-id] :as record}]
+            (let [[mem-rep cache'] (lookup-mem-rep w cache mem-rep-id)
+                  old-engram (-> record
+                                 (dissoc :mem-rep-id)
+                                 (assoc :data mem-rep))
+                  new-engram (-> (f old-engram))]
+              (if (= new-engram ::skip)
+                (assoc state :cache cache')
+                (do
+                  (when-not (s/valid? ::specs/engram new-engram)
+                    (throw (ex-info "Invalid engram"
+                                    {:explain (s/explain-data ::specs/engram new-engram)})))
 
-                   (when (not= (:id old-engram) (:id new-engram))
-                     (throw (ex-info "Engram ID has changed"
-                                     {:old old-engram :new new-engram})))
+                  (when (not= (:id old-engram) (:id new-engram))
+                    (throw (ex-info "Engram ID has changed"
+                                    {:old old-engram :new new-engram})))
 
-                   (let [mem-rep-id' (put-mem-rep! w (:data new-engram))]
-                     (update-record! w (-> new-engram
-                                           (dissoc :data)
-                                           (assoc :mem-rep-id mem-rep-id')))
-                     {:result (conj result new-engram)
-                      :cache (cache/miss cache'
-                                         mem-rep-id'
-                                         (:data new-engram))})))))
-           {:result []
-            :cache (cache/lu-cache-factory {} :threshold mem-rep-cache-threshold)}
-           (->query filter order))]
-      (commit! w)
-      result)))
+                  (let [new-engram' (assoc new-engram :created (:created old-engram))
+                        mem-rep-id' (put-mem-rep! w (:data new-engram))]
+                    (update-record! w (-> new-engram'
+                                          (dissoc :data)
+                                          (assoc :mem-rep-id mem-rep-id')))
+                    {:result (conj result new-engram')
+                     :cache (cache/miss cache'
+                                        mem-rep-id'
+                                        (:data new-engram'))})))))
+          {:result []
+           :cache (cache/lu-cache-factory {} :threshold mem-rep-cache-threshold)})
+         :result)))
