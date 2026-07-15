@@ -1,7 +1,7 @@
 (ns retrograde.jdbc.core
   (:require [clojure.edn :as edn]
             [retrograde.core :as rg]
-            [retrograde.time :refer [->epoch ->instant]]
+            [retrograde.jdbc.time :refer [->epoch ->instant]]
             [honey.sql :as sql]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs]))

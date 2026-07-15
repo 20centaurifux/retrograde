@@ -1,4 +1,4 @@
-(ns retrograde.time)
+(ns retrograde.jdbc.time)
 
 (defn ->epoch
   "Converts a java.time.Instant or java.util.Date to epoch seconds.

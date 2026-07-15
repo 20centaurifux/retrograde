@@ -3,7 +3,7 @@
             [clojure.test :refer [testing is]]
             [retrograde.core :refer :all]
             [retrograde.specs :as specs]
-            [retrograde.time :refer [->epoch]]))
+            [retrograde.jdbc.time :refer [->epoch]]))
 
 (defn test-open-write
   [store]
