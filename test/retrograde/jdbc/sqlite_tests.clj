@@ -2,8 +2,7 @@
   (:require [clojure.test :refer [use-fixtures deftest]]
             [retrograde.core :refer [init Store]]
             [retrograde.jdbc.core :refer [->Store]]
-            [retrograde.jdbc.sqlite.core]
-            [retrograde.jdbc.sqlite.ddl]
+            [retrograde.jdbc.sqlite]
             [retrograde.reader-tests :as rd]
             [retrograde.writer-tests :as wt]
             [next.jdbc :as jdbc]))

@@ -41,8 +41,7 @@ Here's a quick example of setting up Retrograde with a SQLite database:
 ```clojure
 (require '[retrograde.core :as rg])
 (require '[retrograde.jdbc.core :refer [->Store]])
-(require '[retrograde.jdbc.sqlite.core])
-(require '[retrograde.jdbc.sqlite.ddl])
+(require '[retrograde.jdbc.sqlite])
 
 (def honeysql-opts {:dialect :ansi
                     :quoted-snake true})

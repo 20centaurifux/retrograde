@@ -1,6 +1,8 @@
-(ns retrograde.jdbc.sqlite.ddl
-  (:require [retrograde.jdbc.core :refer [create-tables]]
+(ns retrograde.jdbc.sqlite
+  (:require [retrograde.jdbc.core :as jdbc]
             [honey.sql :as sql]))
+
+;;; DDL
 
 (defn- create-mem-rep-table
   [relation]
@@ -30,10 +32,19 @@
   {:create-index [[(keyword (str (name relation) "-expires-at-idx")) :if-not-exists]
                   [relation :expires-at]]})
 
-(defmethod create-tables "sqlite"
+(defmethod jdbc/create-tables "sqlite"
   [_ds {sql :sql {:keys [engram mem-rep]} :tables}]
   (mapv #(sql/format % sql)
         [(create-mem-rep-table mem-rep)
          (create-engram-table engram mem-rep)
          (create-engram-table-key-index engram)
          (create-engram-table-expires-at-index engram)]))
+
+;;; Queries
+
+(defmethod jdbc/insert-mem-rep-if-absent-query "sqlite"
+  [_ relation id data]
+  {:insert-into relation
+   :values [{:id id :data data}]
+   :on-conflict :id
+   :do-nothing true})
