@@ -58,27 +58,30 @@
             (update :expires-at ->epoch))
    :where [:= :id (:id record)]})
 
+(defn- add-where-clause [query condition]
+  (update query :where #(if (some? %)
+                          [:and % condition]
+                          condition)))
+
 (defn- apply-engram-filters
   [query {:keys [filter order]} & {:keys [alias]}]
-  (letfn [(add-where-clause [query condition]
-            (update query :where #(if % [:and % condition] condition)))]
-    (let [prefix (if alias (str alias ".") "")
-          kw (fn [s] (keyword (str prefix s)))]
-      (cond-> query
-        (:id filter)
-        (add-where-clause [:in (kw "id") (:id filter)])
+  (let [prefix (if alias (str alias ".") "")
+        kw (fn [s] (keyword (str prefix s)))]
+    (cond-> query
+      (:id filter)
+      (add-where-clause [:in (kw "id") (:id filter)])
 
-        (:key filter)
-        (add-where-clause [:in (kw "key") (:key filter)])
+      (:key filter)
+      (add-where-clause [:in (kw "key") (:key filter)])
 
-        (:expires-until filter)
-        (add-where-clause [:<= (kw "expires-at") (->epoch (:expires-until filter))])
+      (:expires-until filter)
+      (add-where-clause [:<= (kw "expires-at") (->epoch (:expires-until filter))])
 
-        (:expires-after filter)
-        (add-where-clause [:>= (kw "expires-at") (->epoch (:expires-after filter))])
+      (:expires-after filter)
+      (add-where-clause [:>= (kw "expires-at") (->epoch (:expires-after filter))])
 
-        order
-        (assoc :order-by order)))))
+      order
+      (assoc :order-by order))))
 
 (defn- select-engram-query
   ([{:keys [engram]} engram-id]
@@ -159,11 +162,14 @@
     nil)
 
   (put-mem-rep! [writer data]
-    (let [id (->hash data)]
+    (let [mem-rep-id (->hash data)]
       (execute-one!
        writer
-       (insert-mem-rep-if-absent-query dbtype (:mem-rep tables) id (pr-str data)))
-      id))
+       (insert-mem-rep-if-absent-query dbtype
+                                       (:mem-rep tables)
+                                       mem-rep-id
+                                       (pr-str data)))
+      mem-rep-id))
 
   (read-mem-rep [writer mem-rep-id]
     (let [result (execute-one! writer (select-mem-rep-query tables mem-rep-id))]
