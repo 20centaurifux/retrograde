@@ -61,6 +61,9 @@
 (deftest test-writer-put-mem-rep!
   (wt/test-put-mem-rep! store))
 
+(deftest test-delete-orphan-mem-reps!
+  (wt/test-delete-orphan-mem-reps! store))
+
 (deftest test-writer-create-record!
   (wt/test-create-record! store))
 

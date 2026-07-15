@@ -65,6 +65,9 @@
     Returns the mem-rep-id for the stored data.")
   (read-mem-rep [writer mem-rep-id]
     "Reads a memory representation by ID.")
+  (delete-orphan-mem-reps!
+    [writer]
+    "Removes unreferenced memory representations.")
   (create-record! [writer k mem-rep-id expires-at]
     "Creates a new engram record.
 
@@ -129,6 +132,13 @@
   {:pre [(store? store)]}
   (with-write-transaction [w store]
     (delete-all! w)))
+
+(defn delete-orphans!
+  "Cleans up memory representations that are no longer referenced by any engram."
+  [store]
+  {:pre [(store? store)]}
+  (with-write-transaction [w store]
+    (delete-orphan-mem-reps! w)))
 
 ;; Direct Engram Access
 

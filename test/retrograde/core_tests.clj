@@ -139,7 +139,7 @@
           store (->WriterStore writer)]
       (try
         (clear-all! store)
-        (is false "Expected commit failed error to be thrown")
+        (is false "Expected commit! failed error to be thrown")
         (catch Throwable e
           (is (= "commit! failed" (.getMessage e)))))
 
@@ -156,12 +156,93 @@
           store (->WriterStore writer)]
       (try
         (clear-all! store)
-        (is false "Expected commit failed error to be thrown")
+        (is false "Expected commit! failed error to be thrown")
         (catch Throwable e
           (is (= "commit! failed" (.getMessage e)))
           (is (empty? (.getSuppressed e)))))
 
       (assert/called-once-with? (:delete-all! spy) writer)
+      (assert/called-once-with? (:commit! spy) writer)
+      (assert/not-called? (:rollback! spy)))))
+
+;; Delete Orphans
+
+(deftest test-delete-orphans!
+  (testing "calls delete-orphan-mem-reps! and commit!"
+    (let [writer (writer
+                  (delete-orphan-mem-reps! [_])
+                  (commit! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (delete-orphans! store)
+
+      (assert/called-once-with? (:delete-orphan-mem-reps! spy) writer)
+      (assert/called-once-with? (:commit! spy) writer)))
+
+  (testing "delete-orphan-mem-reps! throws Error"
+    (let [writer (writer
+                  (delete-orphan-mem-reps! [_] (throw (Error. "delete-orphan-mem-reps! failed")))
+                  (commit! [_])
+                  (rollback! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (is (thrown? Error (delete-orphans! store)))
+
+      (assert/called-once-with? (:delete-orphan-mem-reps! spy) writer)
+      (assert/not-called? (:commit! spy))
+      (assert/called-once-with? (:rollback! spy) writer)))
+
+  (testing "rollback! throws Error"
+    (let [writer (writer
+                  (delete-orphan-mem-reps! [_] (throw (Error. "delete-orphan-mem-reps! failed")))
+                  (commit! [_])
+                  (rollback! [_] (throw (Error. "rollback! failed"))))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (try
+        (delete-orphans! store)
+        (is false "Expected delete-orphan-mem-reps! error to be thrown")
+        (catch Throwable e
+          (is (= "delete-orphan-mem-reps! failed" (.getMessage e)))
+          (is (= ["rollback! failed"]
+                 (mapv #(.getMessage %) (.getSuppressed e))))))
+
+      (assert/called-once-with? (:delete-orphan-mem-reps! spy) writer)
+      (assert/not-called? (:commit! spy))
+      (assert/called-once-with? (:rollback! spy) writer)))
+
+  (testing "commit! throws Error"
+    (let [writer (writer
+                  (delete-orphan-mem-reps! [_])
+                  (commit! [_] (throw (Error. "commit! failed")))
+                  (rollback! [_]))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (try
+        (delete-orphans! store)
+        (is false "Expected commit! failed error to be thrown")
+        (catch Throwable e
+          (is (= "commit! failed" (.getMessage e)))))
+
+      (assert/called-once-with? (:delete-orphan-mem-reps! spy) writer)
+      (assert/called-once-with? (:commit! spy) writer)
+      (assert/not-called? (:rollback! spy))))
+
+  (testing "commit! throws Error and rollback! is not called"
+    (let [writer (writer
+                  (delete-orphan-mem-reps! [_])
+                  (commit! [_] (throw (Error. "commit! failed")))
+                  (rollback! [_] (throw (Error. "rollback! failed"))))
+          spy (p/spies writer)
+          store (->WriterStore writer)]
+      (try
+        (delete-orphans! store)
+        (is false "Expected commit! failed error to be thrown")
+        (catch Throwable e
+          (is (= "commit! failed" (.getMessage e)))
+          (is (empty? (.getSuppressed e)))))
+
+      (assert/called-once-with? (:delete-orphan-mem-reps! spy) writer)
       (assert/called-once-with? (:commit! spy) writer)
       (assert/not-called? (:rollback! spy)))))
 
@@ -303,7 +384,7 @@
           store (->WriterStore writer)]
       (try
         (memorize! store k mem-rep)
-        (is false "Expected commit failed error to be thrown")
+        (is false "Expected commit! failed error to be thrown")
         (catch Throwable e
           (is (= "commit! failed" (.getMessage e)))
           (is (empty? (.getSuppressed e)))))
@@ -739,7 +820,7 @@
               (assoc engram :data new-mem-rep))]
       (try
         (reconsolidate! store f)
-        (is false "Expected commit failed error to be thrown")
+        (is false "Expected commit! failed error to be thrown")
         (catch Throwable e
           (is (= "commit! failed" (.getMessage e)))))
 
@@ -773,7 +854,7 @@
               (assoc engram :data new-mem-rep))]
       (try
         (reconsolidate! store f)
-        (is false "Expected commit failed error to be thrown")
+        (is false "Expected commit! failed error to be thrown")
         (catch Throwable e
           (is (= "commit! failed" (.getMessage e)))
           (is (empty? (.getSuppressed e)))))

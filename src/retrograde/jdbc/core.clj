@@ -28,6 +28,8 @@
 
 ;;; Queries
 
+;; Memory Representations
+
 (defmulti insert-mem-rep-if-absent-query
   (fn [dbtype _relation _id _data] dbtype))
 
@@ -40,6 +42,14 @@
   {:select [[:id] [:data]]
    :from mem-rep
    :where [:= :id id]})
+
+(defn- delete-orphan-mem-reps-query
+  [{:keys [engram mem-rep]}]
+  {:delete-from mem-rep
+   :where [:not-in :id {:select [:mem-rep-id]
+                        :from engram}]})
+
+;; Engrams
 
 (defn- insert-engram-query
   [{:keys [engram]} k mem-rep-id expires-at]
@@ -175,6 +185,10 @@
     (let [result (execute-one! writer (select-mem-rep-query tables mem-rep-id))]
       (when (seq result)
         (-> result :data edn/read-string))))
+
+  (delete-orphan-mem-reps! [writer]
+    (execute-one! writer (delete-orphan-mem-reps-query tables))
+    nil)
 
   (create-record! [writer k mem-rep-id expires-at]
     (let [id (-> (execute-one! writer

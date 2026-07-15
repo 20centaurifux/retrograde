@@ -170,6 +170,44 @@
         (is (some? result))
         (is (= data result))))))
 
+(defn test-delete-orphan-mem-reps!
+  [store]
+  (testing "returns nil"
+    (with-open [writer (open-write store)]
+      (is (nil? (delete-orphan-mem-reps! writer)))))
+
+  (testing "deletes unreferenced mem-reps"
+    (with-open [writer (open-write store)]
+      (let [referenced-data {:status "referenced"}
+            orphan-data {:status "orphan"}
+            referenced-id (put-mem-rep! writer referenced-data)
+            orphan-id (put-mem-rep! writer orphan-data)]
+        (create-record! writer "referenced-key" referenced-id nil)
+        (delete-orphan-mem-reps! writer)
+        (is (= referenced-data (read-mem-rep writer referenced-id)))
+        (is (nil? (read-mem-rep writer orphan-id))))))
+
+  (testing "keeps mem-reps referenced by multiple records"
+    (with-open [writer (open-write store)]
+      (let [data {:status "shared"}
+            mem-rep-id (put-mem-rep! writer data)]
+        (create-record! writer "shared-key-1" mem-rep-id nil)
+        (create-record! writer "shared-key-2" mem-rep-id nil)
+        (delete-orphan-mem-reps! writer)
+        (is (= data (read-mem-rep writer mem-rep-id))))))
+
+  (testing "deletes mem-reps orphaned by record updates"
+    (with-open [writer (open-write store)]
+      (let [old-data {:status "old"}
+            new-data {:status "new"}
+            old-id (put-mem-rep! writer old-data)
+            new-id (put-mem-rep! writer new-data)
+            record (create-record! writer "updated-key" old-id nil)]
+        (update-record! writer (assoc record :mem-rep-id new-id))
+        (delete-orphan-mem-reps! writer)
+        (is (nil? (read-mem-rep writer old-id)))
+        (is (= new-data (read-mem-rep writer new-id)))))))
+
 (defn test-create-record!
   [store]
   (testing "returns valid record"
