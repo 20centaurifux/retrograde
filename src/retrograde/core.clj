@@ -188,15 +188,15 @@
   - `f`: The reducing function
   - `init`: The initial value for the reduction
   - `:filter`: Optional keyword argument with a filter map to select engrams.
-            Supported filters:
-            - `:key` - collection of key strings to match
-            - `:id` - collection of engram IDs to match
-            - `:expires-until` - Instant, selects engrams expiring before this time
-            - `:expires-after` - Instant, selects engrams expiring after this time
+               Supported filters:
+               - `:key` - collection of key strings to match
+               - `:id` - collection of engram IDs to match
+               - `:expires-until` - Instant, selects engrams expiring before this time
+               - `:expires-after` - Instant, selects engrams expiring after this time
   - `:order`: Optional keyword argument with a vector of [field direction] tuples
-             (default: [[:key :asc] [:created :asc]])
-             Allowed fields: :id, :key, :created, :expires-at
-             Allowed directions: :asc, :desc
+              (default: [[:key :asc] [:created :asc]])
+              Allowed fields: :id, :key, :created, :expires-at
+              Allowed directions: :asc, :desc
 
   Returns the result of the transduction.
 
@@ -232,15 +232,15 @@
          - An updated engram map (will be saved)
          - :retrograde.core/skip (engram will be skipped)
   - `:filter`: Optional keyword argument with a filter map to select engrams.
-            Supported filters:
-            - `:key` - collection of key strings to match
-            - `:id` - collection of engram IDs to match
-            - `:expires-until` - Instant, selects engrams expiring before this time
-            - `:expires-after` - Instant, selects engrams expiring after this time
+               Supported filters:
+               - `:key` - collection of key strings to match
+               - `:id` - collection of engram IDs to match
+               - `:expires-until` - Instant, selects engrams expiring before this time
+               - `:expires-after` - Instant, selects engrams expiring after this time
   - `:order`: Optional keyword argument with a vector of [field direction] tuples
-             (default: [[:created :asc]])
-             Allowed fields: :id, :key, :created, :expires-at
-             Allowed directions: :asc, :desc
+              (default: [[:created :asc]])
+              Allowed fields: :id, :key, :created, :expires-at
+              Allowed directions: :asc, :desc
 
   The function `f` receives each engram as a full map with :id, :key, :data,
   :created, :expires-at, and :decay-level fields. It should return an updated
@@ -287,7 +287,7 @@
                                     {:old old-engram :new new-engram})))
 
                   (let [new-engram' (assoc new-engram :created (:created old-engram))
-                        mem-rep-id' (put-mem-rep! w (:data new-engram))]
+                        mem-rep-id' (put-mem-rep! w (:data new-engram'))]
                     (update-record! w (-> new-engram'
                                           (dissoc :data)
                                           (assoc :mem-rep-id mem-rep-id')))
