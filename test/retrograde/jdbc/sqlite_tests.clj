@@ -4,6 +4,7 @@
             [retrograde.jdbc.core :refer [->Store]]
             [retrograde.jdbc.sqlite]
             [retrograde.reader-tests :as rd]
+            [retrograde.store-tests :as st]
             [retrograde.writer-tests :as wt]
             [next.jdbc :as jdbc]))
 
@@ -28,6 +29,14 @@
         (f)))))
 
 (use-fixtures :each sqlite-fixture)
+
+;;; Store
+
+(deftest test-instants-survive-time-zone-changes
+  (st/test-instants-survive-time-zone-changes store))
+
+(deftest test-dates-survive-time-zone-changes
+  (st/test-dates-survive-time-zone-changes store))
 
 ;;; Writer
 
