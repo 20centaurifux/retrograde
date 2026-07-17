@@ -34,6 +34,24 @@ Retrograde comes with a JDBC implementation for storing and retrieving memories,
 
 The JDBC adapter handles the persistence layer transparently, allowing you to focus on your application logic while Retrograde manages the temporal aspects of your data.
 
+### JDBC Notes
+
+The JDBC store persists `java.time.Instant` values as epoch seconds. Sub-second
+precision is truncated when `:created` and `:expires-at` values are written, so
+an instant such as `2030-06-15T12:30:45.123456789Z` is read back as
+`2030-06-15T12:30:45Z`.
+
+Memory representation data is serialized with `pr-str` and deserialized with
+`clojure.edn/read-string`. Values must therefore round-trip through EDN. Data
+that prints with unreadable tagged literals, such as arbitrary Java objects, can
+be written but may fail when read back.
+
+Retrograde wraps public write operations in transactions. If an operation fails,
+the JDBC writer rolls the transaction back before rethrowing the original error.
+If closing the underlying JDBC connection also fails afterwards, that close error
+can mask the original transaction failure. Applications that need to preserve the
+primary failure should handle lower-level JDBC writer lifecycles explicitly.
+
 ### Getting Started
 
 Here's a quick example of setting up Retrograde with a SQLite database:
