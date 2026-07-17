@@ -163,7 +163,7 @@
   (commit! [_]
     (.commit conn))
 
-  (rg/rollback! [_]
+  (rollback! [_]
     (.rollback conn))
 
   (delete-all! [writer]
