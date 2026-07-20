@@ -199,44 +199,9 @@ The transformation function receives the complete engram and decides what action
 
 ## Store Utilities
 
-The `retrograde.store` namespaces contain helpers for adapting stores without
-changing the storage backend itself. These wrappers are useful when a backend has
-different operational constraints than Retrograde expects.
-
-### Implementing Store Decorators
-
-`retrograde.store.core` contains macros for building store decorators. A
-decorator wraps an existing reader or writer and overrides only the behavior it
-needs to change, while forwarding all other protocol methods to the wrapped
-resource.
-
-The available helper macros are:
-
-- `defdecorated-writer` - defines a writer wrapper implementing
-  `java.io.Closeable`, `retrograde.core/Closed`, and `retrograde.core/Writer`
-- `defdecorated-reader` - defines a reader wrapper implementing
-  `java.io.Closeable`, `retrograde.core/Closed`, and `retrograde.core/Reader`
-
-```clojure
-(require '[retrograde.store.core :refer [defdecorated-writer]])
-
-(defn- ->child-writer []
-  (reify rg/Writer
-    (put-mem-rep! [_ data] data)))
-
-(defdecorated-writer ParentWriter [child]
-  (put-mem-rep! [_ data]
-                [:parent (rg/put-mem-rep! child data)]))
-
-(-> (->child-writer)
-    (->ParentWriter)
-    (rg/put-mem-rep! :child))
-;; [:parent :child]
-```
-
 ### Serializing Writes
 
-`retrograde.store.serialized/serialize-writes` wraps an existing store and
+`retrograde.serialized/serialize-writes` wraps an existing store and
 ensures that only one write transaction can be open at a time. Read transactions
 are passed through unchanged, so concurrent readers are not affected by the
 write lock.
@@ -245,7 +210,7 @@ Use it when the underlying store or database connection cannot safely handle
 multiple open writers:
 
 ```clojure
-(require '[retrograde.store.serialized :refer [serialize-writes]])
+(require '[retrograde.serialized :refer [serialize-writes]])
 
 (def raw-store (->Store ds store-opts))
 (def store (serialize-writes raw-store))

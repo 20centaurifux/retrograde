@@ -7,7 +7,8 @@
                  [org.clojure/core.cache "1.2.263"]
                  [org.clojure/test.check "1.1.3"]
                  [com.github.seancorfield/next.jdbc "1.3.1118"]
-                 [com.github.seancorfield/honeysql "2.7.1399"]]
+                 [com.github.seancorfield/honeysql "2.7.1399"]
+                 [de.dixieflatline/smuk "0.1.0-SNAPSHOT"]]
   :target-path "target/%s"
   :aot nil
   :profiles {:test {:dependencies [[org.xerial/sqlite-jdbc "3.53.2.0"]

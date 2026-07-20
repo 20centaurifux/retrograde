@@ -1,7 +1,7 @@
-(ns retrograde.store.serialized-tests
+(ns retrograde.serialized-tests
   (:require [clojure.test :refer [deftest testing is]]
             [retrograde.core :as rg]
-            [retrograde.store.serialized :refer [serialize-writes]]))
+            [retrograde.serialized :refer [serialize-writes]]))
 
 ;;; Writer
 

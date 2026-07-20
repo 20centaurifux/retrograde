@@ -1,16 +1,20 @@
-(ns retrograde.store.serialized
+(ns retrograde.serialized
   (:require [retrograde.core :as rg]
-            [retrograde.store.core :as st]))
+            [smuk.core :as smuk]))
 
 ;;; Writer
 
-(st/defdecorated-writer LockedWriter [child semaphore closed?]
+(smuk/defsmuk LockedWriter
+  [^rg/Writer child semaphore closed?]
+  java.io.Closeable
   (close [_]
          (when (.compareAndSet closed? false true)
            (try
              (.close child)
              (finally
-               (.release semaphore))))))
+               (.release semaphore)))))
+
+  rg/Closed)
 
 ;;; Store
 
