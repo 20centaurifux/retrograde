@@ -1,10 +1,10 @@
-# Retrograde
+# retrograde
 
 A key-value database with stateful versioning and time-dependent degeneration - inspired by the principles of human memory.
 
 ## Overview
 
-Retrograde simulates natural forgetfulness in digital systems through controlled information loss and transformations. Instead of simply deleting data, it degenerates over time.
+`retrograde` simulates natural forgetfulness in digital systems through controlled information loss and transformations. Instead of simply deleting data, it degenerates over time.
 
 ## Core Concepts
 
@@ -26,13 +26,29 @@ Retrograde simulates natural forgetfulness in digital systems through controlled
 
 ## Walkthrough
 
-Retrograde is designed to work with any database backend through a pluggable storage interface. This allows you to use your preferred database technology while leveraging Retrograde's unique memory management capabilities.
+`retrograde` is designed to work with any database backend through a pluggable storage interface. This allows you to use your preferred database technology while leveraging `retrograde`'s unique memory management capabilities.
+
+Implementations of `retrograde.core/Reader` and `retrograde.core/Writer` must
+also implement `java.io.Closeable` and `retrograde.core/Closed` so that
+`retrograde` can manage their lifecycle safely.
 
 ### Database Support
 
-Retrograde comes with a JDBC implementation for storing and retrieving memories, making it compatible with virtually any SQL database.
+`retrograde` provides a common JDBC store and comes with an implementation for
+SQLite. Supporting another JDBC database requires methods for these multimethods,
+dispatched by the datasource's `:dbtype`:
 
-The JDBC adapter handles the persistence layer transparently, allowing you to focus on your application logic while Retrograde manages the temporal aspects of your data.
+- `retrograde.jdbc.core/create-tables` must return the formatted SQL statements
+  that create the memory representation and engram tables and their indexes.
+- `retrograde.jdbc.core/insert-mem-rep-if-absent-query` must return a HoneySQL
+  query that inserts a memory representation without replacing an existing row
+  with the same ID.
+
+The database-specific namespace must be loaded so that its methods are
+registered. For SQLite, require `retrograde.jdbc.sqlite` as shown below.
+
+The JDBC adapter handles the persistence layer transparently, allowing you to focus
+on your application logic while `retrograde` manages the temporal aspects of your data.
 
 ### JDBC Notes
 
@@ -46,7 +62,7 @@ Memory representation data is serialized with `pr-str` and deserialized with
 that prints with unreadable tagged literals, such as arbitrary Java objects, can
 be written but may fail when read back.
 
-Retrograde wraps public write operations in transactions. If an operation fails,
+`retrograde` wraps public write operations in transactions. If an operation fails,
 the JDBC writer rolls the transaction back before rethrowing the original error.
 If closing the underlying JDBC connection also fails afterwards, that close error
 can mask the original transaction failure. Applications that need to preserve the
@@ -54,7 +70,7 @@ primary failure should handle lower-level JDBC writer lifecycles explicitly.
 
 ### Getting Started
 
-Here's a quick example of setting up Retrograde with a SQLite database:
+Here's a quick example of setting up `retrograde` with a SQLite database:
 
 ```clojure
 (require '[retrograde.core :as rg])
@@ -139,7 +155,7 @@ The `recall` function retrieves a single engram by its ID.
 
 ### Streaming Engrams
 
-Retrograde provides transducer-like functions to efficiently process engrams:
+`retrograde` provides transducer-like functions to efficiently process engrams:
 
 ```clojure
 ;; Store all active engrams associated to a given key in a vector ordered by expiry date
