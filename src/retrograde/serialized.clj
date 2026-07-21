@@ -5,16 +5,16 @@
 ;;; Writer
 
 (smuk/defsmuk LockedWriter
-  [^rg/Writer child semaphore closed?]
+  [child semaphore closed?]
+  rg/Writer
+  rg/Closed
   java.io.Closeable
   (close [_]
          (when (.compareAndSet closed? false true)
            (try
              (.close child)
              (finally
-               (.release semaphore)))))
-
-  rg/Closed)
+               (.release semaphore))))))
 
 ;;; Store
 
